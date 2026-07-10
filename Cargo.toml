@@ -6,7 +6,12 @@ description = "Zellij tab bar plugin for Pi agent sessions"
 license = "MIT"
 
 [dependencies]
-zellij-tile = "=0.44.0"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-minijinja = "2.21"
+ansi_term = "0.12"
+colored = "2"
+unicode-width = "0.1.8"
+zellij-tile = { git = "https://github.com/zellij-org/zellij", rev = "4bfda976b110b5d3182fca004ee7031f6322253e" }
+zellij-tile-utils = { git = "https://github.com/zellij-org/zellij", rev = "4bfda976b110b5d3182fca004ee7031f6322253e" }
+
+[lints.clippy]
+too_many_arguments = "allow"
+useless_format = "allow"

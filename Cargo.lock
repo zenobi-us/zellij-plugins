@@ -27,6 +27,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ansi_term"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d52a9bb7ec0cf484c551830a7ce27bd20d67eac647e1befb56b0be4ee39a55d2"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1102,12 +1111,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
-name = "memo-map"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
-
-[[package]]
 name = "memoffset"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1153,16 +1156,6 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
-
-[[package]]
-name = "minijinja"
-version = "2.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb3d648e68cea56d9858d535ee28f9538404e2dd8cb08ed0bd05dca379477f39"
-dependencies = [
- "memo-map",
- "serde",
-]
 
 [[package]]
 name = "minimal-lexical"
@@ -2533,17 +2526,17 @@ dependencies = [
 name = "zellij-tabbar"
 version = "0.1.0"
 dependencies = [
- "minijinja",
- "serde",
- "serde_json",
+ "ansi_term",
+ "colored",
+ "unicode-width",
  "zellij-tile",
+ "zellij-tile-utils",
 ]
 
 [[package]]
 name = "zellij-tile"
-version = "0.44.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28e99d5eb7fb1f4701c10d957ae90e7ffa2da714b0dc9d6569b2a20704bc454e"
+version = "0.45.0"
+source = "git+https://github.com/zellij-org/zellij?rev=4bfda976b110b5d3182fca004ee7031f6322253e#4bfda976b110b5d3182fca004ee7031f6322253e"
 dependencies = [
  "clap",
  "prost",
@@ -2555,10 +2548,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zellij-tile-utils"
+version = "0.45.0"
+source = "git+https://github.com/zellij-org/zellij?rev=4bfda976b110b5d3182fca004ee7031f6322253e#4bfda976b110b5d3182fca004ee7031f6322253e"
+dependencies = [
+ "ansi_term",
+]
+
+[[package]]
 name = "zellij-utils"
-version = "0.44.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b823df41cf824f6b9db45f50c3b2bc02cc66d9dd4db223392f19b02cff4a876"
+version = "0.45.0"
+source = "git+https://github.com/zellij-org/zellij?rev=4bfda976b110b5d3182fca004ee7031f6322253e#4bfda976b110b5d3182fca004ee7031f6322253e"
 dependencies = [
  "anyhow",
  "backtrace",
