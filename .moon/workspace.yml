@@ -2,6 +2,7 @@
 projects:
   sources:
     repo: "."
+    zellij-tabbar: "pkgs/zellij-tabbar"
 
 vcs:
   defaultBranch: "main"

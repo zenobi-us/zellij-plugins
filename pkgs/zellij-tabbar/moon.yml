@@ -1,0 +1,79 @@
+---
+$schema: "file://../../.moon/cache/schemas/project.json"
+
+language: rust
+layer: library
+
+tasks:
+  build:
+    script: |
+      set -euo pipefail
+      rustup target add wasm32-wasip1 >/dev/null 2>&1 || true
+      CARGO_TARGET_DIR="$PWD/target" cargo build --release --target wasm32-wasip1
+    inputs:
+      - "Cargo.toml"
+      - "src/**/*.rs"
+    outputs:
+      - "target/wasm32-wasip1/release/zellij-tabbar.wasm"
+
+  check:
+    script: |
+      set -euo pipefail
+      rustup target add wasm32-wasip1 >/dev/null 2>&1 || true
+      CARGO_TARGET_DIR="$PWD/target" cargo check --target wasm32-wasip1
+    inputs:
+      - "Cargo.toml"
+      - "src/**/*.rs"
+
+  test:
+    script: |
+      set -euo pipefail
+      host_target="$(rustc -vV | awk '/^host:/ {print $2}')"
+      CARGO_TARGET_DIR="$PWD/target" cargo test --target "$host_target"
+    inputs:
+      - "Cargo.toml"
+      - "src/**/*.rs"
+
+  e2e:
+    deps:
+      - "~:build"
+    script: bats tests
+    inputs:
+      - "tests/**/*"
+      - "target/wasm32-wasip1/release/zellij-tabbar.wasm"
+    options:
+      cache: false
+
+  install:
+    deps:
+      - "~:build"
+    script: |
+      set -euo pipefail
+      wasm_path="$PWD/target/wasm32-wasip1/release/zellij-tabbar.wasm"
+      install_dir="${ZELLIJ_PLUGIN_DIR:-$HOME/.config/zellij/plugins}"
+      mkdir -p "$install_dir"
+      cp "$wasm_path" "$install_dir/zellij-tabbar.wasm"
+    inputs:
+      - "target/wasm32-wasip1/release/zellij-tabbar.wasm"
+    options:
+      cache: false
+
+  publish:
+    deps:
+      - "~:build"
+    inputs:
+      - "target/wasm32-wasip1/release/zellij-tabbar.wasm"
+    options:
+      cache: false
+    script: |
+      set -euo pipefail
+      tag="${PUBLISH_TAG:?PUBLISH_TAG is required}"
+      wasm_path="$PWD/target/wasm32-wasip1/release/zellij-tabbar.wasm"
+      repo_args=()
+      if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+        repo_args=(--repo "$GITHUB_REPOSITORY")
+      fi
+
+      test -f "$wasm_path"
+      gh release view "$tag" "${repo_args[@]}" >/dev/null
+      gh release upload "$tag" "$wasm_path#zellij-tabbar.wasm" "${repo_args[@]}" --clobber

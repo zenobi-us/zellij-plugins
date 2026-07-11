@@ -24,7 +24,7 @@ moon run repo:build
 The WASM file is written to:
 
 ```text
-target/wasm32-wasip1/release/zellij-tabbar.wasm
+pkgs/zellij-tabbar/target/wasm32-wasip1/release/zellij-tabbar.wasm
 ```
 
 Copy it into your Zellij plugin directory:
@@ -303,7 +303,7 @@ moon run repo:e2e # requires bats, python3, and zellij
 Publish the built WASM to an existing GitHub release:
 
 ```bash
-PUBLISH_TAG=v0.1.0 moon run repo:publish
+PUBLISH_TAG=v0.1.0 moon run zellij-tabbar:publish
 ```
 
 Set `GITHUB_REPOSITORY=owner/repo` when the current checkout has no GitHub remote.
