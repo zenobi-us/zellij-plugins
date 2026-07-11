@@ -3,6 +3,9 @@
 setup_file() {
   command -v zellij >/dev/null || skip "zellij is required"
   command -v python3 >/dev/null || skip "python3 is required"
+  local zellij_version
+  zellij_version="$(zellij --version | awk '{ print $2 }')"
+  [[ "$zellij_version" == 0.45.* ]] || skip "Zellij 0.45.x is required by the plugin ABI (found $zellij_version)"
   cargo build --release --target wasm32-wasip1
   export PLUGIN_WASM
   PLUGIN_WASM="$(realpath "$BATS_TEST_DIRNAME/../target/wasm32-wasip1/release/zellij-tabbar.wasm")"

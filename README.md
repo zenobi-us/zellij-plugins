@@ -2,6 +2,8 @@
 
 A focusable, template-driven tab bar plugin for [Zellij](https://zellij.dev/).
 
+Requires Zellij 0.45.x.
+
 It provides:
 
 - clickable tab and new-tab buttons
