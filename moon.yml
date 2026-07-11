@@ -50,6 +50,20 @@ tasks:
     options:
       cache: false
 
+  install:
+    deps:
+      - "~:build"
+    script: |
+      set -euo pipefail
+      wasm_path="$PWD/target/wasm32-wasip1/release/zellij-tabbar.wasm"
+      install_dir="${ZELLIJ_PLUGIN_DIR:-$HOME/.config/zellij/plugins}"
+      mkdir -p "$install_dir"
+      cp "$wasm_path" "$install_dir/zellij-tabbar.wasm"
+    inputs:
+      - "target/wasm32-wasip1/release/zellij-tabbar.wasm"
+    options:
+      cache: false
+
   publish:
     deps:
       - "~:build"
