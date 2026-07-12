@@ -20,7 +20,7 @@ struct Cell<A> {
 impl<A> Default for Cell<A> {
     fn default() -> Self {
         Self {
-            text: String::new(),
+            text: " ".into(),
             action: None,
         }
     }
@@ -114,14 +114,23 @@ fn natural_size<A>(node: &Node<A>) -> Result<(usize, usize), Error> {
                 .iter()
                 .map(natural_size)
                 .collect::<Result<_, _>>()?;
+            let gaps = spec.gap.saturating_mul(children.len().saturating_sub(1));
             Ok(match spec.direction {
                 Direction::Row => (
-                    sizes.iter().map(|s| s.0).sum(),
+                    sizes
+                        .iter()
+                        .map(|s| s.0)
+                        .sum::<usize>()
+                        .saturating_add(gaps),
                     sizes.iter().map(|s| s.1).max().unwrap_or(1),
                 ),
                 Direction::Column => (
                     sizes.iter().map(|s| s.0).max().unwrap_or(0),
-                    sizes.iter().map(|s| s.1).sum(),
+                    sizes
+                        .iter()
+                        .map(|s| s.1)
+                        .sum::<usize>()
+                        .saturating_add(gaps),
                 ),
             })
         },
@@ -173,20 +182,22 @@ fn layout_flex<A: Clone>(
             },
         })
         .collect();
+    let fixed_gaps = spec.gap.saturating_mul(children.len().saturating_sub(1));
+    let child_available = main_available.saturating_sub(fixed_gaps);
     let total: usize = sizes.iter().sum();
-    if total < main_available {
-        distribute(&mut sizes, children, main_available - total, true);
-    } else if total > main_available && spec.overflow == Overflow::Normal {
-        distribute(&mut sizes, children, total - main_available, false);
+    if total < child_available {
+        distribute(&mut sizes, children, child_available - total, true);
+    } else if total > child_available && spec.overflow == Overflow::Normal {
+        distribute(&mut sizes, children, total - child_available, false);
     }
-    let content_size: usize = sizes.iter().sum();
+    let content_size = sizes.iter().sum::<usize>().saturating_add(fixed_gaps);
     let offset = if spec.overflow == Overflow::Scroll && content_size > main_available {
-        focused_offset(children, &sizes, main_available)
+        focused_offset(children, &sizes, spec.gap, main_available)
     } else {
         0
     };
     let free = main_available.saturating_sub(content_size);
-    let (mut cursor, gap, around) = justify(spec.justify, free, children.len());
+    let (mut cursor, distributed_gap) = justify(spec.justify, free, children.len());
     let mut canvas = Canvas::new(width, height);
     for ((child, natural), main) in children.iter().zip(naturals).zip(sizes) {
         let natural_cross = if spec.direction == Direction::Row {
@@ -216,7 +227,7 @@ fn layout_flex<A: Clone>(
         };
         let child_canvas = layout(child, child_width, child_height)?;
         let visible_cursor = cursor.saturating_sub(offset);
-        if cursor + main > offset && visible_cursor < main_available {
+        if cursor.saturating_add(main) > offset && visible_cursor < main_available {
             let skip = offset.saturating_sub(cursor);
             if spec.direction == Direction::Row {
                 let clipped = crop(
@@ -252,10 +263,10 @@ fn layout_flex<A: Clone>(
                 );
             }
         }
-        cursor += main + gap;
-        if around {
-            cursor += gap;
-        }
+        cursor = cursor
+            .saturating_add(main)
+            .saturating_add(spec.gap)
+            .saturating_add(distributed_gap);
     }
     Ok(canvas)
 }
@@ -296,13 +307,13 @@ fn distribute<A>(sizes: &mut [usize], children: &[Node<A>], mut amount: usize, g
     }
 }
 
-fn focused_offset<A>(children: &[Node<A>], sizes: &[usize], viewport: usize) -> usize {
-    let mut start = 0;
+fn focused_offset<A>(children: &[Node<A>], sizes: &[usize], gap: usize, viewport: usize) -> usize {
+    let mut start = 0usize;
     for (child, size) in children.iter().zip(sizes) {
         if contains_focus(child) {
-            return (start + size).saturating_sub(viewport);
+            return start.saturating_add(*size).saturating_sub(viewport);
         }
-        start += size;
+        start = start.saturating_add(*size).saturating_add(gap);
     }
     0
 }
@@ -315,17 +326,17 @@ fn contains_focus<A>(node: &Node<A>) -> bool {
     }
 }
 
-fn justify(justify: Justify, free: usize, count: usize) -> (usize, usize, bool) {
+fn justify(justify: Justify, free: usize, count: usize) -> (usize, usize) {
     match justify {
-        Justify::Start => (0, 0, false),
-        Justify::Center => (free / 2, 0, false),
-        Justify::End => (free, 0, false),
-        Justify::SpaceBetween if count > 1 => (0, free / (count - 1), false),
+        Justify::Start => (0, 0),
+        Justify::Center => (free / 2, 0),
+        Justify::End => (free, 0),
+        Justify::SpaceBetween if count > 1 => (0, free / (count - 1)),
         Justify::SpaceAround if count > 0 => {
             let gap = free / count;
-            (gap / 2, gap, false)
+            (gap / 2, gap)
         },
-        _ => (0, 0, false),
+        _ => (0, 0),
     }
 }
 
@@ -505,6 +516,7 @@ mod tests {
     fn scroll_keeps_focused_button_visible() {
         let node = Node::Flex {
             spec: FlexSpec {
+                gap: 2,
                 overflow: Overflow::Scroll,
                 ..FlexSpec::default()
             },

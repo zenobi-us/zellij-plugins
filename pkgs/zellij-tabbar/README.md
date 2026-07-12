@@ -211,6 +211,7 @@ Supported mouse interaction is left click. Right click and middle click have no 
   grow=1,
   shrink=1,
   basis="auto",
+  gap=1,
   justify="start",
   align="start",
   overflow="normal"
@@ -225,6 +226,7 @@ Supported mouse interaction is left click. Right click and middle click have no 
 | `grow` | Non-negative integer ratio | `0` |
 | `shrink` | Non-negative integer ratio | `1` |
 | `basis` | `auto` or terminal-cell integer | `auto` |
+| `gap` | Non-negative terminal-cell integer between children | `0` |
 | `justify` | `start`, `center`, `end`, `space-between`, `space-around` | `start` |
 | `align` | `start`, `center`, `end`, `stretch` | `start` |
 | `overflow` | `normal`, `scroll` | `normal` |
@@ -238,21 +240,21 @@ Available filters:
 ```jinja
 {{ "bold" | bold }}
 {{ "dim" | dim }}
-{{ "text" | fg(context.theme.text) }}
-{{ "active" | fg(context.theme.active_text) | bg(context.theme.active_background) }}
+{{ "text" | fg(theme.text) }}
+{{ "active" | fg(theme.active_text) | bg(theme.active_background) }}
 ```
 
 Theme values:
 
-- `context.theme.text`
-- `context.theme.background`
-- `context.theme.active_text`
-- `context.theme.active_background`
-- `context.theme.muted_text`
-- `context.theme.muted_background`
-- `context.theme.alert`
+- `theme.text`
+- `theme.background`
+- `theme.active_text`
+- `theme.active_background`
+- `theme.muted_text`
+- `theme.muted_background`
+- `theme.alert`
 
-`fg` and `bg` accept renderer colour tokens shaped as `rgb:R,G,B` or `index:N`. `context.theme` supplies tokens matching the active Zellij theme.
+`fg` and `bg` accept renderer colour tokens shaped as `rgb:R,G,B` or `index:N`. `theme` supplies tokens matching the active Zellij theme.
 
 ## Strict template rules
 

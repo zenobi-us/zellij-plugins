@@ -1176,6 +1176,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "minijinja-embed"
+version = "2.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf74fd3b5645c9aeaddb3ddb0d7fc2055a70682c40a5cb0b930781f13b2a009b"
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2546,6 +2552,8 @@ version = "0.1.0"
 dependencies = [
  "ansi_term",
  "chrono",
+ "minijinja",
+ "minijinja-embed",
  "serde",
  "zellij-template-render",
  "zellij-tile",

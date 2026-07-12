@@ -54,6 +54,7 @@ pub(super) struct FlexSpec {
     pub(super) grow: usize,
     pub(super) shrink: usize,
     pub(super) basis: Basis,
+    pub(super) gap: usize,
     pub(super) justify: Justify,
     pub(super) align: Align,
     pub(super) overflow: Overflow,
@@ -66,6 +67,7 @@ impl Default for FlexSpec {
             grow: 0,
             shrink: 1,
             basis: Basis::Auto,
+            gap: 0,
             justify: Justify::Start,
             align: Align::Start,
             overflow: Overflow::Normal,
@@ -97,8 +99,52 @@ where
     A: Clone + Send + 'static,
     F: Fn(ButtonView<'_, A>) -> Result<ButtonPresentation, Error> + Send + Sync + 'static,
 {
+    render_tree_in(
+        Environment::new(),
+        TemplateTarget::Source(template),
+        data,
+        actions,
+        present_button,
+    )
+}
+
+pub(super) fn render_named_tree<'source, A, F>(
+    environment: Environment<'source>,
+    template_name: &str,
+    data: Value,
+    actions: &ActionRegistry<A>,
+    present_button: F,
+) -> Result<Node<A>, Error>
+where
+    A: Clone + Send + 'static,
+    F: Fn(ButtonView<'_, A>) -> Result<ButtonPresentation, Error> + Send + Sync + 'static,
+{
+    render_tree_in(
+        environment,
+        TemplateTarget::Name(template_name),
+        data,
+        actions,
+        present_button,
+    )
+}
+
+enum TemplateTarget<'a> {
+    Source(&'a str),
+    Name(&'a str),
+}
+
+fn render_tree_in<'source, A, F>(
+    mut env: Environment<'source>,
+    target: TemplateTarget<'_>,
+    data: Value,
+    actions: &ActionRegistry<A>,
+    present_button: F,
+) -> Result<Node<A>, Error>
+where
+    A: Clone + Send + 'static,
+    F: Fn(ButtonView<'_, A>) -> Result<ButtonPresentation, Error> + Send + Sync + 'static,
+{
     let arena = Arc::new(Mutex::new(Vec::<A>::new()));
-    let mut env = Environment::new();
     env.add_filter("format", format_time);
     env.add_filter("bold", bold);
     env.add_filter("dim", dim);
@@ -134,7 +180,10 @@ where
         },
     );
 
-    let rendered = env.render_str(template, data)?;
+    let rendered = match target {
+        TemplateTarget::Source(template) => env.render_str(template, data)?,
+        TemplateTarget::Name(name) => env.get_template(name)?.render(data)?,
+    };
     Ok(Node::Flex {
         spec: FlexSpec::default(),
         children: parse_nodes(&rendered, &arena)?,
@@ -231,6 +280,7 @@ fn flex_marker(state: &TemplateState<'_, '_>, kwargs: Kwargs) -> Result<String, 
             })?
             .to_string(),
     };
+    let gap = kwargs.get::<Option<usize>>("gap")?.unwrap_or(0);
     let justify = parse_choice(
         kwargs
             .get::<Option<String>>("justify")?
@@ -258,7 +308,7 @@ fn flex_marker(state: &TemplateState<'_, '_>, kwargs: Kwargs) -> Result<String, 
     let caller: Value = kwargs.get("caller")?;
     kwargs.assert_all_used()?;
     let body = state.format(caller.call(state, &[])?)?;
-    Ok(format!("{MARKER}F|{direction}|{grow}|{shrink}|{basis}|{justify}|{align}|{overflow}{MARKER_END}{body}{MARKER}/F{MARKER_END}"))
+    Ok(format!("{MARKER}F|{direction}|{grow}|{shrink}|{basis}|{gap}|{justify}|{align}|{overflow}{MARKER_END}{body}{MARKER}/F{MARKER_END}"))
 }
 
 fn parse_choice(value: &str, valid: &[&str], name: &str) -> Result<String, Error> {
@@ -429,7 +479,7 @@ fn push_node<A>(stack: &mut [ParseOpen<A>], node: Node<A>) -> Result<(), Error> 
 
 fn parse_flex_spec(value: &str) -> Result<FlexSpec, Error> {
     let fields: Vec<_> = value.split('|').collect();
-    if fields.len() != 7 {
+    if fields.len() != 8 {
         return Err(layout_error("invalid Flex marker"));
     }
     Ok(FlexSpec {
@@ -453,7 +503,10 @@ fn parse_flex_spec(value: &str) -> Result<FlexSpec, Error> {
                     .map_err(|_| layout_error("invalid Flex basis"))?,
             )
         },
-        justify: match fields[4] {
+        gap: fields[4]
+            .parse()
+            .map_err(|_| layout_error("invalid Flex gap"))?,
+        justify: match fields[5] {
             "start" => Justify::Start,
             "center" => Justify::Center,
             "end" => Justify::End,
@@ -461,14 +514,14 @@ fn parse_flex_spec(value: &str) -> Result<FlexSpec, Error> {
             "space-around" => Justify::SpaceAround,
             _ => return Err(layout_error("invalid Flex justify")),
         },
-        align: match fields[5] {
+        align: match fields[6] {
             "start" => Align::Start,
             "center" => Align::Center,
             "end" => Align::End,
             "stretch" => Align::Stretch,
             _ => return Err(layout_error("invalid Flex align")),
         },
-        overflow: match fields[6] {
+        overflow: match fields[7] {
             "normal" => Overflow::Normal,
             "scroll" => Overflow::Scroll,
             _ => return Err(layout_error("invalid Flex overflow")),
@@ -490,7 +543,7 @@ mod tests {
     fn custom_template_parses_nested_flex_and_button() {
         let arena = Mutex::new(vec![TestAction::New]);
         let rendered = format!(
-            "{MARKER}F|column|1|1|auto|center|stretch|normal{MARKER_END}{MARKER}B|0|1{MARKER_END}+{MARKER}/B{MARKER_END}{MARKER}/F{MARKER_END}"
+            "{MARKER}F|column|1|1|auto|2|center|stretch|normal{MARKER_END}{MARKER}B|0|1{MARKER_END}+{MARKER}/B{MARKER_END}{MARKER}/F{MARKER_END}"
         );
         let nodes = parse_nodes(&rendered, &arena).unwrap();
         let frame = layout(

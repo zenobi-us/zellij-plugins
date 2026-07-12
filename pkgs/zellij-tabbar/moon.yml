@@ -12,7 +12,9 @@ tasks:
       CARGO_TARGET_DIR="$PWD/target" cargo build --release --target wasm32-wasip1
     inputs:
       - "Cargo.toml"
+      - "build.rs"
       - "src/**/*.rs"
+      - "src/template/**/*.jinja"
     outputs:
       - "target/wasm32-wasip1/release/zellij-tabbar.wasm"
 
@@ -23,7 +25,9 @@ tasks:
       CARGO_TARGET_DIR="$PWD/target" cargo check --target wasm32-wasip1
     inputs:
       - "Cargo.toml"
+      - "build.rs"
       - "src/**/*.rs"
+      - "src/template/**/*.jinja"
 
   test:
     script: |
@@ -32,7 +36,9 @@ tasks:
       CARGO_TARGET_DIR="$PWD/target" cargo test --target "$host_target"
     inputs:
       - "Cargo.toml"
+      - "build.rs"
       - "src/**/*.rs"
+      - "src/template/**/*.jinja"
 
   e2e:
     deps:

@@ -9,7 +9,7 @@ mod template;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-pub use minijinja::{context, Error, ErrorKind, Value};
+pub use minijinja::{context, Environment, Error, ErrorKind, Value};
 use unicode_width::UnicodeWidthChar;
 
 /// Typed decoder for one function exposed under the template `actions` object.
@@ -100,7 +100,7 @@ where
         Self { actions }
     }
 
-    /// Renders template data into terminal lines and typed hitboxes.
+    /// Renders inline template data into terminal lines and typed hitboxes.
     pub fn render<F>(
         &self,
         template: &str,
@@ -115,6 +115,31 @@ where
             return Ok(Frame::default());
         }
         let root = template::render_tree(template, data, &self.actions, present_button)?;
+        Ok(layout::layout(&root, viewport.cols, viewport.rows)?.into_frame())
+    }
+
+    /// Renders a named template from a preconfigured MiniJinja environment.
+    pub fn render_named<F>(
+        &self,
+        environment: Environment<'_>,
+        template_name: &str,
+        data: Value,
+        viewport: Viewport,
+        present_button: F,
+    ) -> Result<Frame<A>, Error>
+    where
+        F: Fn(ButtonView<'_, A>) -> Result<ButtonPresentation, Error> + Send + Sync + 'static,
+    {
+        if viewport.rows == 0 || viewport.cols == 0 {
+            return Ok(Frame::default());
+        }
+        let root = template::render_named_tree(
+            environment,
+            template_name,
+            data,
+            &self.actions,
+            present_button,
+        )?;
         Ok(layout::layout(&root, viewport.cols, viewport.rows)?.into_frame())
     }
 }
@@ -191,6 +216,25 @@ mod tests {
             .unwrap();
         assert_eq!(frame.lines, ["go"]);
         assert_eq!(frame.hitboxes[0][0], Some(TestAction::Open(7)));
+    }
+
+    #[test]
+    fn flex_gap_inserts_cells_between_children() {
+        let renderer = Renderer::new(ActionRegistry::<TestAction>::new());
+        let frame = renderer
+            .render(
+                r#"{% call Flex(gap=2) %}{% call Flex() %}a{% endcall %}{% call Flex() %}b{% endcall %}{% endcall %}"#,
+                context! {},
+                Viewport { rows: 1, cols: 4 },
+                |button| {
+                    Ok(ButtonPresentation {
+                        label: button.label.to_string(),
+                        focused: button.focused.unwrap_or(false),
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(frame.lines, ["a  b"]);
     }
 
     #[test]

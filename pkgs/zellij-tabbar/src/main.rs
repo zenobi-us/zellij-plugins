@@ -4,7 +4,7 @@ mod render;
 
 use std::collections::BTreeMap;
 
-use render::{ClickAction, RenderedFrame};
+use render::{ClickAction, RenderedFrame, TabBarRenderer};
 use zellij_tile::prelude::*;
 
 /// Host-facing plugin state. Rendering details stay inside the `render` module.
@@ -14,6 +14,7 @@ struct State {
     mode_info: ModeInfo,
     template: Option<String>,
     frame: RenderedFrame,
+    tabbar_renderer: TabBarRenderer,
 }
 
 register_plugin!(State);
@@ -77,9 +78,8 @@ impl ZellijPlugin for State {
             // Clear stale output after the final visible tab disappears.
             self.frame = RenderedFrame::default();
         } else {
-            let template = render::selected_template(self.template.as_deref());
-            self.frame = match render::render(
-                template,
+            self.frame = match self.tabbar_renderer.render(
+                self.template.as_deref(),
                 self.mode_info.session_name.as_deref(),
                 &self.tabs,
                 rows,
@@ -88,7 +88,7 @@ impl ZellijPlugin for State {
                 self.mode_info.capabilities,
             ) {
                 Ok(frame) => frame,
-                Err(error) => render::error_frame(&error, rows, cols),
+                Err(error) => self.tabbar_renderer.error_frame(&error, rows, cols),
             };
         }
         let output = (0..rows)

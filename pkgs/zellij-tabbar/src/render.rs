@@ -5,21 +5,13 @@ use chrono::Local;
 use serde::Serialize;
 use zellij_template_render::{
     context, error_frame as render_error_frame, ActionRegistry, ButtonPresentation, ButtonView,
-    Error, ErrorKind, Frame, Renderer, Value, Viewport,
+    Environment, Error, ErrorKind, Frame, Renderer, Value, Viewport,
 };
 use zellij_tile::prelude::*;
 use zellij_tile_utils::style;
 
 /// Built-in template used when plugin configuration provides no override.
-const DEFAULT_TEMPLATE: &str = r#"{%- call Flex(direction="row") -%}
-{%- call Flex(shrink=0) -%}{{ session.name }} {% endcall -%}
-{%- call Flex(direction="row", grow=1, shrink=1, overflow="scroll") -%}
-{%- for tab in session.tabs -%}
-{%- call Button(on_click=actions.switch_tab(tab.index), focused=tab.active) -%}{{ tab.name }}{%- endcall -%}
-{%- endfor -%}
-{%- endcall -%}
-{%- call Button(on_click=actions.new_tab()) -%}+{%- endcall -%}
-{%- endcall -%}"#;
+const DEFAULT_TEMPLATE_NAME: &str = "main.jinja";
 
 /// Typed operation attached to cells rendered by `Button`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +21,17 @@ pub(crate) enum ClickAction {
 }
 
 pub(crate) type RenderedFrame = Frame<ClickAction>;
+
+/// Long-lived tabbar renderer owned by the plugin state.
+pub(crate) struct TabBarRenderer {
+    renderer: Renderer<ClickAction>,
+}
+
+impl Default for TabBarRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Serialize)]
 struct TemplateSession<'a> {
@@ -54,75 +57,92 @@ struct TemplateTheme {
     alert: String,
 }
 
-/// Chooses configured template, falling back to the built-in template.
-pub(crate) fn selected_template(override_template: Option<&str>) -> &str {
-    override_template.unwrap_or(DEFAULT_TEMPLATE)
-}
+impl TabBarRenderer {
+    pub(crate) fn new() -> Self {
+        Self {
+            renderer: Renderer::new(
+                ActionRegistry::new()
+                    .with("switch_tab", |args| {
+                        let index = args.first().and_then(Value::as_usize).ok_or_else(|| {
+                            Error::new(
+                                ErrorKind::InvalidOperation,
+                                "switch_tab expects an integer index",
+                            )
+                        })?;
+                        Ok(ClickAction::SwitchTab(index))
+                    })
+                    .with("new_tab", |args| {
+                        if !args.is_empty() {
+                            return Err(Error::new(
+                                ErrorKind::InvalidOperation,
+                                "new_tab expects no arguments",
+                            ));
+                        }
+                        Ok(ClickAction::NewTab)
+                    }),
+            ),
+        }
+    }
 
-/// Renders tabbar data through the shared template renderer.
-pub(crate) fn render(
-    template: &str,
-    session_name: Option<&str>,
-    tabs: &[TabInfo],
-    rows: usize,
-    cols: usize,
-    colors: Styling,
-    capabilities: PluginCapabilities,
-) -> Result<RenderedFrame, Error> {
-    let actions = ActionRegistry::new()
-        .with("switch_tab", |args| {
-            let index = args.first().and_then(Value::as_usize).ok_or_else(|| {
-                Error::new(
-                    ErrorKind::InvalidOperation,
-                    "switch_tab expects an integer index",
-                )
-            })?;
-            Ok(ClickAction::SwitchTab(index))
-        })
-        .with("new_tab", |args| {
-            if !args.is_empty() {
-                return Err(Error::new(
-                    ErrorKind::InvalidOperation,
-                    "new_tab expects no arguments",
-                ));
-            }
-            Ok(ClickAction::NewTab)
-        });
-    let model = TemplateSession {
-        name: session_name.unwrap_or_default(),
-        tabs: tabs
-            .iter()
-            .map(|tab| TemplateTab {
-                name: &tab.name,
-                index: tab.position + 1,
-                active: tab.active,
-            })
-            .collect(),
-    };
-    let theme = TemplateTheme {
-        text: color_token(colors.text_unselected.base),
-        background: color_token(colors.text_unselected.background),
-        active_text: color_token(colors.ribbon_selected.base),
-        active_background: color_token(colors.ribbon_selected.background),
-        muted_text: color_token(colors.ribbon_unselected.base),
-        muted_background: color_token(colors.ribbon_unselected.background),
-        alert: color_token(colors.ribbon_unselected.emphasis_3),
-    };
-    let tabs = tabs.to_vec();
-    Renderer::new(actions).render(
-        template,
-        context! {
+    /// Renders tabbar data through the shared template renderer.
+    pub(crate) fn render(
+        &self,
+        template: Option<&str>,
+        session_name: Option<&str>,
+        tabs: &[TabInfo],
+        rows: usize,
+        cols: usize,
+        colors: Styling,
+        capabilities: PluginCapabilities,
+    ) -> Result<RenderedFrame, Error> {
+        let model = TemplateSession {
+            name: session_name.unwrap_or_default(),
+            tabs: tabs
+                .iter()
+                .map(|tab| TemplateTab {
+                    name: &tab.name,
+                    index: tab.position + 1,
+                    active: tab.active,
+                })
+                .collect(),
+        };
+        let theme = TemplateTheme {
+            text: color_token(colors.text_unselected.base),
+            background: color_token(colors.text_unselected.background),
+            active_text: color_token(colors.ribbon_selected.base),
+            active_background: color_token(colors.ribbon_selected.background),
+            muted_text: color_token(colors.ribbon_unselected.base),
+            muted_background: color_token(colors.ribbon_unselected.background),
+            alert: color_token(colors.ribbon_unselected.emphasis_3),
+        };
+        let tabs = tabs.to_vec();
+        let data = context! {
             session => model,
             system => context! { time => Local::now().timestamp() },
-            context => context! { theme => theme },
-        },
-        Viewport { rows, cols },
-        move |button| present_button(button, &tabs, colors, capabilities),
-    )
-}
+            theme => theme,
+        };
+        let viewport = Viewport { rows, cols };
+        match template {
+            Some(source) => self.renderer.render(source, data, viewport, move |button| {
+                present_button(button, &tabs, colors, capabilities)
+            }),
+            None => {
+                let mut environment = Environment::new();
+                minijinja_embed::load_templates!(&mut environment);
+                self.renderer.render_named(
+                    environment,
+                    DEFAULT_TEMPLATE_NAME,
+                    data,
+                    viewport,
+                    move |button| present_button(button, &tabs, colors, capabilities),
+                )
+            },
+        }
+    }
 
-pub(crate) fn error_frame(error: &Error, rows: usize, cols: usize) -> RenderedFrame {
-    render_error_frame(error, Viewport { rows, cols })
+    pub(crate) fn error_frame(&self, error: &Error, rows: usize, cols: usize) -> RenderedFrame {
+        render_error_frame(error, Viewport { rows, cols })
+    }
 }
 
 fn present_button(
@@ -272,12 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn default_and_custom_template_selection() {
-        assert_eq!(selected_template(None), DEFAULT_TEMPLATE);
-        assert_eq!(selected_template(Some("custom")), "custom");
-    }
-
-    #[test]
     fn default_template_renders_buttons_and_actions() {
         let mut first = TabInfo {
             name: "one".into(),
@@ -291,16 +305,17 @@ mod tests {
             ..TabInfo::default()
         };
         let mode = ModeInfo::default();
-        let frame = render(
-            DEFAULT_TEMPLATE,
-            Some("demo"),
-            &[first, second],
-            1,
-            80,
-            mode.style.colors,
-            PluginCapabilities { arrow_fonts: false },
-        )
-        .unwrap();
+        let frame = TabBarRenderer::new()
+            .render(
+                None,
+                Some("demo"),
+                &[first, second],
+                1,
+                80,
+                mode.style.colors,
+                PluginCapabilities { arrow_fonts: false },
+            )
+            .unwrap();
         assert!(plain_text(&frame.lines[0]).contains("one"));
         assert!(frame.hitboxes[0]
             .iter()
@@ -311,6 +326,39 @@ mod tests {
     }
 
     #[test]
+    fn theme_is_top_level_and_old_context_path_fails() {
+        let mode = ModeInfo::default();
+        let renderer = TabBarRenderer::new();
+        let capabilities = PluginCapabilities { arrow_fonts: false };
+
+        let frame = renderer
+            .render(
+                Some(r#"{{ "x" | fg(theme.text) }}"#),
+                None,
+                &[],
+                1,
+                20,
+                mode.style.colors,
+                capabilities,
+            )
+            .unwrap();
+        assert!(plain_text(&frame.lines[0]).contains('x'));
+
+        let error = renderer
+            .render(
+                Some(r#"{{ "x" | fg(context.theme.text) }}"#),
+                None,
+                &[],
+                1,
+                20,
+                mode.style.colors,
+                capabilities,
+            )
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::UndefinedError);
+    }
+
+    #[test]
     fn missing_explicit_focus_still_follows_active_tab() {
         let tab = TabInfo {
             name: "one".into(),
@@ -318,8 +366,8 @@ mod tests {
             ..TabInfo::default()
         };
         let mode = ModeInfo::default();
-        let frame = render(
-            r#"{% call Flex(overflow="scroll") %}{% call Button(on_click=actions.switch_tab(1)) %}one{% endcall %}{% endcall %}"#,
+        let frame = TabBarRenderer::new().render(
+            Some(r#"{% call Flex(overflow="scroll") %}{% call Button(on_click=actions.switch_tab(1)) %}one{% endcall %}{% endcall %}"#),
             None,
             &[tab],
             1,

@@ -2,7 +2,7 @@
 
 ## Template Globals
 
-Template-visible snapshot used to produce a frame. `session`, `system`, `actions`, and `context` are top-level globals. `actions` exposes opaque click-action constructors; `context` contains rendering metadata such as theme colours. Rendering does not perform plugin state changes.
+Template-visible snapshot used to produce a frame. `session`, `system`, `theme`, and `actions` are top-level globals. `theme` contains semantic colour tokens from the active Zellij theme. `actions` exposes opaque click-action constructors. Rendering does not perform plugin state changes.
 
 ## Rendered Frame
 

@@ -8,10 +8,15 @@ license = "MIT"
 [dependencies]
 ansi_term = "0.12"
 chrono = "0.4"
+minijinja = "2.21"
+minijinja-embed = "2.21"
 serde = { version = "1", features = ["derive"] }
 zellij-template-render = { path = "../zellij-template-render" }
 zellij-tile = { git = "https://github.com/zellij-org/zellij", rev = "4bfda976b110b5d3182fca004ee7031f6322253e" }
 zellij-tile-utils = { git = "https://github.com/zellij-org/zellij", rev = "4bfda976b110b5d3182fca004ee7031f6322253e" }
+
+[build-dependencies]
+minijinja-embed = "2.21"
 
 [lints.clippy]
 too_many_arguments = "allow"
