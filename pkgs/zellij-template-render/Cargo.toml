@@ -7,6 +7,7 @@ license = "MIT"
 
 [dependencies]
 chrono = "0.4"
+chrono-tz = "0.10"
 minijinja = "2.21"
 unicode-width = "0.1.8"
 

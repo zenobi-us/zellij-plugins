@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use chrono::{Local, TimeZone, Timelike};
+use chrono::{Local, TimeZone, Timelike, Utc};
+use chrono_tz::Tz;
 use minijinja::value::{Kwargs, Rest};
 use minijinja::{Environment, Error, ErrorKind, State as TemplateState, Value};
 
@@ -159,9 +160,12 @@ where
     env.add_function("Flex", flex_marker);
     env.add_function("OnOverflow", on_overflow_marker);
     let clock_refresh = Arc::clone(&refresh_after);
-    env.add_function("Clock", move |kwargs: Kwargs| {
-        clock_marker(kwargs, &clock_refresh)
-    });
+    env.add_function(
+        "Clock",
+        move |state: &TemplateState<'_, '_>, kwargs: Kwargs| {
+            clock_marker(state, kwargs, &clock_refresh)
+        },
+    );
 
     let action_values = actions
         .decoders
@@ -345,10 +349,20 @@ fn parse_choice(value: &str, valid: &[&str], name: &str) -> Result<String, Error
 }
 
 fn clock_marker(
+    state: &TemplateState<'_, '_>,
     kwargs: Kwargs,
     requested_refresh: &Mutex<Option<Duration>>,
 ) -> Result<String, Error> {
     let pattern = kwargs.get::<String>("format")?;
+    let timezone = kwargs
+        .get::<Option<String>>("tz")?
+        .or_else(|| {
+            state
+                .lookup("env")
+                .and_then(|env| env.get_attr("TZ").ok())
+                .and_then(|value| value.as_str().map(str::to_string))
+        })
+        .unwrap_or_else(|| "UTC".to_string());
     kwargs.assert_all_used()?;
 
     let now = Local::now();
@@ -368,7 +382,26 @@ fn clock_marker(
         .map_err(|_| layout_error("clock refresh lock poisoned"))?;
     *requested = Some(requested.map_or(refresh_after, |current| current.min(refresh_after)));
 
-    format_time(now.timestamp(), pattern)
+    format_time_in_timezone(now.timestamp(), pattern, &timezone)
+}
+
+fn format_time_in_timezone(
+    timestamp: i64,
+    pattern: String,
+    timezone: &str,
+) -> Result<String, Error> {
+    let timezone = timezone.parse::<Tz>().map_err(|_| {
+        Error::new(
+            ErrorKind::InvalidOperation,
+            format!("invalid clock timezone {timezone:?}"),
+        )
+    })?;
+    let time = Utc
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidOperation, "invalid system time"))?
+        .with_timezone(&timezone);
+    Ok(time.format(&chrono_pattern(pattern)).to_string())
 }
 
 fn format_time(timestamp: i64, pattern: String) -> Result<String, Error> {
@@ -376,13 +409,16 @@ fn format_time(timestamp: i64, pattern: String) -> Result<String, Error> {
         .timestamp_opt(timestamp, 0)
         .single()
         .ok_or_else(|| Error::new(ErrorKind::InvalidOperation, "invalid system time"))?;
-    let pattern = pattern
+    Ok(time.format(&chrono_pattern(pattern)).to_string())
+}
+
+fn chrono_pattern(pattern: String) -> String {
+    pattern
         .replace("YYYY", "%Y")
         .replace("YY", "%y")
         .replace("HH", "%H")
         .replace("MM", "%M")
-        .replace("SS", "%S");
-    Ok(time.format(&pattern).to_string())
+        .replace("SS", "%S")
 }
 
 fn bold(value: String) -> String {
