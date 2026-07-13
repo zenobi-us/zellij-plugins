@@ -8,10 +8,13 @@ The crate provides:
 - typed `Button` actions and two-dimensional click hitboxes
 - focus-following overflow
 - ANSI-aware measurement and clipping
-- `Clock(format=...)` with host-scheduled refresh metadata
+- `Clock(format=..., tz=...)` with IANA timezone support and host-scheduled refresh metadata; `tz` defaults to `env.TZ`, then UTC
 - `bold`, `dim`, `fg`, `bg`, and time-format filters
+- `TemplateHost` ownership of template sources, external loading, environment allowlists, and shared `theme`, `env`, and `system` context
 
 Plugins own template data, action semantics, and button presentation. The renderer does not depend on `zellij-tile`.
+
+Use low-level `Renderer` methods for standalone strings. Zellij plugins should normally construct a `TemplateHost` from `TemplateSource`, `TemplateEnvironment`, and `TemplateTheme`. The host validates `template`/`template_file`, defaults the environment allowlist to `TZ`, `LANG`, and `TERM`, and retains named environments so includes remain cached.
 
 ```rust
 use zellij_template_render::{

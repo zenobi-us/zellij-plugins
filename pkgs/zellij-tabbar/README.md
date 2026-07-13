@@ -169,6 +169,24 @@ Invalid configuration, unreadable files, and template failures render a visible 
 
 `tab.index` is one-based.
 
+### Environment
+
+Host environment variables exposed by the WASI runtime are available through the top-level `env` object:
+
+```jinja
+{{ env.TZ }}
+```
+
+`TZ`, `LANG`, and `TERM` are allowed by default. Override the allowlist with a comma-separated `env_vars` plugin setting:
+
+```kdl
+plugin location="file:/home/you/.config/zellij/plugins/zellij-tabbar.wasm" {
+    env_vars "TZ,LANG,TERM,COLORTERM"
+}
+```
+
+Missing or runtime-hidden variables remain undefined. Do not allowlist secrets: template files can render exposed values.
+
 ## Theme
 
 The top-level `theme` object exposes colours derived from the active Zellij theme. Use these values with the `fg` and `bg` filters; they are colour tokens shaped as `rgb:R,G,B` or `index:N`.
@@ -279,7 +297,12 @@ The indicator is excluded from the initial overflow measurement. When overflow o
 
 ### Clock
 
-`Clock` renders local time and asks the host to repaint at the next relevant boundary.
+`Clock` renders time and asks the host to repaint at the next relevant boundary. Its optional `tz` argument accepts an IANA timezone and defaults to `env.TZ`, then UTC when `TZ` is unavailable.
+
+```jinja
+{{ Clock(format=" HH:MM ") }}
+{{ Clock(format=" HH:MM ", tz="Europe/London") }}
+```
 
 | Prop | Type / values | Default | Guide |
 |---|---|---|---|
@@ -337,7 +360,7 @@ The renderer rejects:
 
 Failures appear directly in the tab bar as `template error: ...`.
 
-Template parsing, Flex layout, ANSI clipping, and typed hitboxes come from the shared [`zellij-template-render`](../zellij-template-render) crate. Tab data, actions, and button styling remain owned by this plugin.
+Template source loading, environment and theme context, helper registration, Flex layout, ANSI clipping, and typed hitboxes come from the shared [`zellij-template-render`](../zellij-template-render) crate. Tab data, actions, Zellij colour conversion, and button presentation remain owned by this plugin.
 
 ## Migrating old templates
 

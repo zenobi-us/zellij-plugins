@@ -3,8 +3,9 @@
 mod render;
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
-use render::{ClickAction, RenderedFrame, TabBarRenderer, TemplateSource};
+use render::{ClickAction, RenderedFrame, TabBarRenderer};
 use zellij_tile::prelude::*;
 
 /// Host-facing plugin state. Rendering details stay inside the `render` module.
@@ -12,9 +13,9 @@ use zellij_tile::prelude::*;
 struct State {
     tabs: Vec<TabInfo>,
     mode_info: ModeInfo,
-    template: TemplateSource,
     frame: RenderedFrame,
-    tabbar_renderer: TabBarRenderer,
+    tabbar_renderer: Option<TabBarRenderer>,
+    template_error: Option<String>,
     timer_armed: bool,
 }
 
@@ -30,7 +31,10 @@ impl ZellijPlugin for State {
             permissions.push(PermissionType::FullHdAccess);
         }
         request_permission(&permissions);
-        self.template = TemplateSource::from_configuration(&configuration);
+        match TabBarRenderer::from_configuration(&configuration) {
+            Ok(renderer) => self.tabbar_renderer = Some(renderer),
+            Err(error) => self.template_error = Some(error.to_string()),
+        }
 
         // we dont need to be selectable, since we handle mouse clicks ourselves
         // in fact, making the pane selectable causes a border to be drawn and for height=1 panes,
@@ -87,22 +91,36 @@ impl ZellijPlugin for State {
             // Clear stale output after the final visible tab disappears.
             self.frame = RenderedFrame::default();
         } else {
-            self.frame = match self.tabbar_renderer.render(
-                &mut self.template,
-                self.mode_info.session_name.as_deref(),
-                &self.tabs,
-                rows,
-                cols,
-                self.mode_info.style.colors,
-                self.mode_info.capabilities,
-            ) {
-                Ok(frame) => frame,
-                Err(error) => self.tabbar_renderer.error_frame(&error, rows, cols),
+            self.frame = if let Some(renderer) = &mut self.tabbar_renderer {
+                match renderer.render(
+                    self.mode_info.session_name.as_deref(),
+                    &self.tabs,
+                    rows,
+                    cols,
+                    self.mode_info.style.colors,
+                    self.mode_info.capabilities,
+                ) {
+                    Ok(frame) => frame,
+                    Err(error) => renderer.error_frame(&error, rows, cols),
+                }
+            } else {
+                let error = zellij_template_render::Error::new(
+                    zellij_template_render::ErrorKind::InvalidOperation,
+                    self.template_error
+                        .clone()
+                        .unwrap_or_else(|| "template host unavailable".to_string()),
+                );
+                zellij_template_render::error_frame(
+                    &error,
+                    zellij_template_render::Viewport { rows, cols },
+                )
             };
         }
         if !self.timer_armed {
             if let Some(delay) = self.frame.refresh_after {
-                set_timeout(delay.as_secs_f64());
+                // Cross the clock boundary before repainting. Exact-boundary timers can fire
+                // slightly early and leave the displayed minute unchanged.
+                set_timeout((delay + Duration::from_millis(10)).as_secs_f64());
                 self.timer_armed = true;
             }
         }

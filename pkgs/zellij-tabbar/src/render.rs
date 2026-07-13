@@ -1,15 +1,12 @@
 //! Tabbar-specific template data, actions, and button styling.
 
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-
 use ansi_term::ANSIStrings;
-use chrono::Local;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use zellij_template_render::{
-    context, error_frame as render_error_frame, file_template_environment, ActionRegistry,
-    ButtonPresentation, ButtonView, Environment, Error, ErrorKind, Frame, Renderer, Value,
-    Viewport,
+    error_frame as render_error_frame, ActionRegistry, ButtonPresentation, ButtonView, Environment,
+    Error, ErrorKind, Frame, Renderer, TemplateContext, TemplateEnvironment, TemplateHost,
+    TemplateSource, TemplateTheme, Value, Viewport,
 };
 use zellij_tile::prelude::*;
 use zellij_tile_utils::style;
@@ -26,80 +23,9 @@ pub(crate) enum ClickAction {
 
 pub(crate) type RenderedFrame = Frame<ClickAction>;
 
-/// Template selected from plugin configuration.
-#[derive(Default)]
-pub(crate) enum TemplateSource {
-    #[default]
-    Embedded,
-    Inline(String),
-    External {
-        environment: Box<Environment<'static>>,
-        entry: String,
-    },
-    Invalid(String),
-}
-
-impl TemplateSource {
-    pub(crate) fn from_configuration(configuration: &BTreeMap<String, String>) -> Self {
-        match (
-            configuration.get("template"),
-            configuration.get("template_file"),
-        ) {
-            (Some(_), Some(_)) => Self::Invalid(
-                "template and template_file cannot be configured together".to_string(),
-            ),
-            (Some(source), None) => Self::Inline(source.clone()),
-            (None, Some(path)) => match load_external_template(path) {
-                Ok((environment, entry)) => Self::External {
-                    environment: Box::new(environment),
-                    entry,
-                },
-                Err(error) => Self::Invalid(error.to_string()),
-            },
-            (None, None) => Self::Embedded,
-        }
-    }
-}
-
-fn load_external_template(path: &str) -> Result<(Environment<'static>, String), Error> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let mut entry = PathBuf::from(path);
-    if entry.is_relative() && !entry.starts_with("~") {
-        let config_dir = std::env::var_os("ZELLIJ_CONFIG_DIR")
-            .map(PathBuf::from)
-            .or_else(|| home.as_ref().map(|home| home.join(".config/zellij")))
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::InvalidOperation,
-                    "relative template_file requires ZELLIJ_CONFIG_DIR or HOME",
-                )
-            })?;
-        entry = config_dir.join(entry);
-    }
-    file_template_environment(entry, home, |path| {
-        std::fs::read_to_string(plugin_host_path(path))
-    })
-}
-
-#[cfg(target_arch = "wasm32")]
-fn plugin_host_path(path: &Path) -> PathBuf {
-    Path::new("/host").join(path.strip_prefix("/").unwrap_or(path))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn plugin_host_path(path: &Path) -> PathBuf {
-    path.to_path_buf()
-}
-
 /// Long-lived tabbar renderer owned by the plugin state.
 pub(crate) struct TabBarRenderer {
-    renderer: Renderer<ClickAction>,
-}
-
-impl Default for TabBarRenderer {
-    fn default() -> Self {
-        Self::new()
-    }
+    host: TemplateHost<ClickAction>,
 }
 
 #[derive(Serialize)]
@@ -115,48 +41,47 @@ struct TemplateTab<'a> {
     active: bool,
 }
 
-#[derive(Serialize)]
-struct TemplateTheme {
-    text: String,
-    background: String,
-    active_text: String,
-    active_background: String,
-    muted_text: String,
-    muted_background: String,
-    alert: String,
-}
-
 impl TabBarRenderer {
-    pub(crate) fn new() -> Self {
-        Self {
-            renderer: Renderer::new(
-                ActionRegistry::new()
-                    .with("switch_tab", |args| {
-                        let index = args.first().and_then(Value::as_usize).ok_or_else(|| {
-                            Error::new(
-                                ErrorKind::InvalidOperation,
-                                "switch_tab expects an integer index",
-                            )
-                        })?;
-                        Ok(ClickAction::SwitchTab(index))
-                    })
-                    .with("new_tab", |args| {
-                        if !args.is_empty() {
-                            return Err(Error::new(
-                                ErrorKind::InvalidOperation,
-                                "new_tab expects no arguments",
-                            ));
-                        }
-                        Ok(ClickAction::NewTab)
-                    }),
+    pub(crate) fn from_configuration(
+        configuration: &BTreeMap<String, String>,
+    ) -> Result<Self, Error> {
+        let mut embedded = Environment::new();
+        minijinja_embed::load_templates!(&mut embedded);
+        let source =
+            TemplateSource::from_configuration(configuration, embedded, DEFAULT_TEMPLATE_NAME)?;
+        Ok(Self {
+            host: TemplateHost::new(
+                Renderer::new(
+                    ActionRegistry::new()
+                        .with("switch_tab", |args| {
+                            let index =
+                                args.first().and_then(Value::as_usize).ok_or_else(|| {
+                                    Error::new(
+                                        ErrorKind::InvalidOperation,
+                                        "switch_tab expects an integer index",
+                                    )
+                                })?;
+                            Ok(ClickAction::SwitchTab(index))
+                        })
+                        .with("new_tab", |args| {
+                            if !args.is_empty() {
+                                return Err(Error::new(
+                                    ErrorKind::InvalidOperation,
+                                    "new_tab expects no arguments",
+                                ));
+                            }
+                            Ok(ClickAction::NewTab)
+                        }),
+                ),
+                source,
+                TemplateEnvironment::from_configuration(configuration),
             ),
-        }
+        })
     }
 
     /// Renders tabbar data through the shared template renderer.
     pub(crate) fn render(
-        &self,
-        template: &mut TemplateSource,
+        &mut self,
         session_name: Option<&str>,
         tabs: &[TabInfo],
         rows: usize,
@@ -185,39 +110,13 @@ impl TabBarRenderer {
             alert: color_token(colors.ribbon_unselected.emphasis_3),
         };
         let tabs = tabs.to_vec();
-        let data = context! {
-            session => model,
-            system => context! { time => Local::now().timestamp() },
-            theme => theme,
-        };
         let viewport = Viewport { rows, cols };
-        match template {
-            TemplateSource::Inline(source) => {
-                self.renderer.render(source, data, viewport, move |button| {
-                    present_button(button, &tabs, colors, capabilities)
-                })
-            },
-            TemplateSource::External { environment, entry } => {
-                self.renderer
-                    .render_named_mut(environment, entry, data, viewport, move |button| {
-                        present_button(button, &tabs, colors, capabilities)
-                    })
-            },
-            TemplateSource::Embedded => {
-                let mut environment = Environment::new();
-                minijinja_embed::load_templates!(&mut environment);
-                self.renderer.render_named(
-                    environment,
-                    DEFAULT_TEMPLATE_NAME,
-                    data,
-                    viewport,
-                    move |button| present_button(button, &tabs, colors, capabilities),
-                )
-            },
-            TemplateSource::Invalid(message) => {
-                Err(Error::new(ErrorKind::InvalidOperation, message.clone()))
-            },
-        }
+        self.host.render(
+            TemplateContext::new().with("session", Value::from_serialize(model)),
+            theme,
+            viewport,
+            move |button| present_button(button, &tabs, colors, capabilities),
+        )
     }
 
     pub(crate) fn error_frame(&self, error: &Error, rows: usize, cols: usize) -> RenderedFrame {
@@ -372,19 +271,6 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_template_settings_are_rejected() {
-        let configuration = BTreeMap::from([
-            ("template".to_string(), "inline".to_string()),
-            ("template_file".to_string(), "/tmp/main.jinja".to_string()),
-        ]);
-        assert!(matches!(
-            TemplateSource::from_configuration(&configuration),
-            TemplateSource::Invalid(message)
-                if message == "template and template_file cannot be configured together"
-        ));
-    }
-
-    #[test]
     fn default_template_renders_buttons_and_actions() {
         let mut first = TabInfo {
             name: "one".into(),
@@ -398,9 +284,9 @@ mod tests {
             ..TabInfo::default()
         };
         let mode = ModeInfo::default();
-        let frame = TabBarRenderer::new()
+        let frame = TabBarRenderer::from_configuration(&BTreeMap::new())
+            .unwrap()
             .render(
-                &mut TemplateSource::Embedded,
                 Some("demo"),
                 &[first, second],
                 1,
@@ -422,36 +308,19 @@ mod tests {
     }
 
     #[test]
-    fn theme_is_top_level_and_old_context_path_fails() {
+    fn shared_host_supplies_top_level_theme() {
         let mode = ModeInfo::default();
-        let renderer = TabBarRenderer::new();
+        let mut renderer = TabBarRenderer::from_configuration(&BTreeMap::from([(
+            "template".to_string(),
+            r#"{{ "x" | fg(theme.text) }}"#.to_string(),
+        )]))
+        .unwrap();
         let capabilities = PluginCapabilities { arrow_fonts: false };
 
         let frame = renderer
-            .render(
-                &mut TemplateSource::Inline(r#"{{ "x" | fg(theme.text) }}"#.to_string()),
-                None,
-                &[],
-                1,
-                20,
-                mode.style.colors,
-                capabilities,
-            )
+            .render(None, &[], 1, 20, mode.style.colors, capabilities)
             .unwrap();
         assert!(plain_text(&frame.lines[0]).contains('x'));
-
-        let error = renderer
-            .render(
-                &mut TemplateSource::Inline(r#"{{ "x" | fg(context.theme.text) }}"#.to_string()),
-                None,
-                &[],
-                1,
-                20,
-                mode.style.colors,
-                capabilities,
-            )
-            .unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::UndefinedError);
     }
 
     #[test]
@@ -462,16 +331,21 @@ mod tests {
             ..TabInfo::default()
         };
         let mode = ModeInfo::default();
-        let frame = TabBarRenderer::new().render(
-            &mut TemplateSource::Inline(r#"{% call Flex(overflow="scroll") %}{% call Button(on_click=actions.switch_tab(1)) %}one{% endcall %}{% endcall %}"#.to_string()),
-            None,
-            &[tab],
-            1,
-            3,
-            mode.style.colors,
-            PluginCapabilities { arrow_fonts: true },
-        )
+        let mut renderer = TabBarRenderer::from_configuration(&BTreeMap::from([(
+            "template".to_string(),
+            r#"{% call Flex(overflow="scroll") %}{% call Button(on_click=actions.switch_tab(1)) %}one{% endcall %}{% endcall %}"#.to_string(),
+        )]))
         .unwrap();
+        let frame = renderer
+            .render(
+                None,
+                &[tab],
+                1,
+                3,
+                mode.style.colors,
+                PluginCapabilities { arrow_fonts: true },
+            )
+            .unwrap();
         assert!(frame.hitboxes[0]
             .iter()
             .any(|action| action == &Some(ClickAction::SwitchTab(1))));

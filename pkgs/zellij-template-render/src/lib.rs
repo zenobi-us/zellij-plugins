@@ -4,6 +4,7 @@
 //! The renderer owns template helpers, layout, clipping, and click hitboxes.
 
 mod file_template;
+mod host;
 mod layout;
 mod template;
 
@@ -12,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use file_template::environment as file_template_environment;
+pub use host::{TemplateContext, TemplateEnvironment, TemplateHost, TemplateSource, TemplateTheme};
 pub use minijinja::{context, Environment, Error, ErrorKind, Value};
 use unicode_width::UnicodeWidthChar;
 
@@ -295,6 +297,27 @@ mod tests {
         assert!(frame
             .refresh_after
             .is_some_and(|delay| { !delay.is_zero() && delay <= Duration::from_secs(1) }));
+    }
+
+    #[test]
+    fn clock_uses_explicit_timezone_then_env_tz() {
+        let renderer = Renderer::new(ActionRegistry::<TestAction>::new());
+        let frame = renderer
+            .render(
+                r#"{{ Clock(format="%z", tz="UTC") }} {{ Clock(format="%z") }}"#,
+                context! { env => context! { TZ => "America/New_York" } },
+                Viewport { rows: 1, cols: 11 },
+                |button| {
+                    Ok(ButtonPresentation {
+                        label: button.label.to_string(),
+                        focused: button.focused.unwrap_or(false),
+                    })
+                },
+            )
+            .unwrap();
+
+        assert!(frame.lines[0].starts_with("+0000 "));
+        assert_ne!(&frame.lines[0][6..], "+0000");
     }
 
     #[test]
