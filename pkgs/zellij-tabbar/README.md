@@ -41,6 +41,16 @@ By default this installs:
 
 Set `ZELLIJ_PLUGIN_DIR` to install elsewhere.
 
+## Demo
+
+Build the local WASM and start a fresh Zellij session using [`demo.kdl`](demo.kdl):
+
+```bash
+moon run zellij-tabbar:demo
+```
+
+The task opens the session in a new Ghostty window. Before every launch it deletes the isolated demo permission cache at `target/demo-cache/zellij/permissions.kdl`, forcing Zellij to ask again without touching your normal cache. The tabbar remains selectable while the prompt is active; press `y` or `n`. Set `ZELLIJ_TABBAR_DEMO_SESSION` to choose the session name; otherwise the task generates a unique name.
+
 ## Add it to Zellij
 
 Add a plugin alias to `~/.config/zellij/config.kdl`:
@@ -55,7 +65,7 @@ Use it in a layout:
 
 ```kdl
 layout {
-    pane size=1 borderless=true {
+    pane size=1 borderless=true focus=true {
         tabbar
     }
     pane
@@ -67,17 +77,19 @@ layout {
 The plugin needs:
 
 - `ReadApplicationState` for session and tab data
-- `ChangeApplicationState` for tab and new-tab button actions
+- `ChangeApplicationState` for tab, pane positioning, focus, and reload actions
+- `OpenTerminalsOrPlugins` for opening plugin panes
 - `FullHdAccess` when `template_file` loads templates from the host filesystem
 
-Zellij normally displays an interactive permission request. A one-row tab bar cannot show the full request, so add the grant to Zellij's permission cache before starting the plugin.
+On first load, focus the one-row tabbar so its interactive Zellij permission prompt can consume `y` or `n`. Zellij renders a compact prompt when the pane is too short for the full permission list. After the answer, the plugin becomes non-selectable and keeps its configured one-row height.
 
-Open `${XDG_CACHE_HOME:-$HOME/.cache}/zellij/permissions.kdl` and add a block keyed by the absolute WASM path:
+To pre-grant permissions instead, open `${XDG_CACHE_HOME:-$HOME/.cache}/zellij/permissions.kdl` and add a block keyed by the absolute plugin path:
 
 ```kdl
 "/home/you/.config/zellij/plugins/zellij-tabbar.wasm" {
     ReadApplicationState
     ChangeApplicationState
+    OpenTerminalsOrPlugins
 }
 ```
 
@@ -263,6 +275,27 @@ Available actions:
 |---|---|---|
 | `actions.switch_tab(index)` | `index`: one-based tab index | Switch to the selected tab. |
 | `actions.new_tab()` | None | Create a tab. |
+| `actions.open_or_reload_plugin(url, x=?, y=?, w=?, h=?)` | `url`: plugin URL or alias; coordinates: cells or percentage strings | Open a focused floating plugin pane, or reload the pane previously opened for this URL. |
+
+`open_or_reload_plugin` defaults to a centered pane covering 50% of screen width and height. `x` and `y` are optional; `w` and `h` default to `"50%"`. Repeated clicks float, reposition, focus, and reload the tracked pane. Closing it makes the next click open a new pane.
+
+```jinja
+{% call Button(on_click=actions.open_or_reload_plugin("session-manager")) %}
+  {{ session.name }}
+{% endcall %}
+
+{% call Button(
+  on_click=actions.open_or_reload_plugin(
+    "session-manager",
+    x=0,
+    y=0,
+    w=32,
+    h="100%"
+  )
+) %}
+  {{ session.name }}
+{% endcall %}
+```
 
 Button labels may contain styled text, but cannot contain `Flex`, `Button`, or other layout helpers. Only left click is mapped; right and middle click have no button action.
 

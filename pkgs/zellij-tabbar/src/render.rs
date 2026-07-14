@@ -1,6 +1,7 @@
 //! Tabbar-specific template data, actions, and button styling.
 
 use ansi_term::ANSIStrings;
+use minijinja::value::{from_args, Kwargs};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use zellij_template_render::{
@@ -19,6 +20,10 @@ const DEFAULT_TEMPLATE_NAME: &str = "main.jinja";
 pub(crate) enum ClickAction {
     SwitchTab(usize),
     NewTab,
+    OpenOrReloadPlugin {
+        url: String,
+        coordinates: FloatingPaneCoordinates,
+    },
 }
 
 pub(crate) type RenderedFrame = Frame<ClickAction>;
@@ -71,7 +76,8 @@ impl TabBarRenderer {
                                 ));
                             }
                             Ok(ClickAction::NewTab)
-                        }),
+                        })
+                        .with("open_or_reload_plugin", decode_open_or_reload_plugin),
                 ),
                 source,
                 TemplateEnvironment::from_configuration(configuration),
@@ -134,7 +140,7 @@ fn present_button(
         ClickAction::SwitchTab(index) => tabs
             .iter()
             .any(|tab| tab.active && tab.position + 1 == *index),
-        ClickAction::NewTab => false,
+        ClickAction::NewTab | ClickAction::OpenOrReloadPlugin { .. } => false,
     });
     Ok(ButtonPresentation {
         label: style_button(
@@ -172,11 +178,13 @@ fn style_button(
             }
             label
         },
-        ClickAction::NewTab => label.to_string(),
+        ClickAction::NewTab | ClickAction::OpenOrReloadPlugin { .. } => label.to_string(),
     };
     let alternate = match action {
         ClickAction::SwitchTab(index) => index % 2 == 0 && capabilities.arrow_fonts,
-        ClickAction::NewTab => tabs.len() % 2 == 1 && capabilities.arrow_fonts,
+        ClickAction::NewTab | ClickAction::OpenOrReloadPlugin { .. } => {
+            tabs.len() % 2 == 1 && capabilities.arrow_fonts
+        },
     };
     let background = if focused {
         palette.ribbon_selected.background
@@ -200,7 +208,9 @@ fn style_button(
                 palette.ribbon_unselected.base
             }
         },
-        ClickAction::NewTab => palette.ribbon_unselected.base,
+        ClickAction::NewTab | ClickAction::OpenOrReloadPlugin { .. } => {
+            palette.ribbon_unselected.base
+        },
     };
     let fill = palette.text_unselected.background;
     let left = style!(fill, background).paint(separator);
@@ -209,6 +219,75 @@ fn style_button(
         .paint(format!(" {} ", label));
     let right = style!(background, fill).paint(separator);
     Ok(ANSIStrings(&[left, text, right]).to_string())
+}
+
+fn decode_open_or_reload_plugin(args: &[Value]) -> Result<ClickAction, Error> {
+    let (positional, kwargs) = from_args::<(&[Value], Kwargs)>(args)?;
+    if positional.len() != 1 {
+        return Err(Error::new(
+            ErrorKind::InvalidOperation,
+            "open_or_reload_plugin expects one plugin URL",
+        ));
+    }
+    let url = positional[0]
+        .as_str()
+        .filter(|url| !url.is_empty())
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidOperation,
+                "open_or_reload_plugin expects a non-empty plugin URL",
+            )
+        })?
+        .to_string();
+    let x = coordinate_argument(&kwargs, "x", None, true)?;
+    let y = coordinate_argument(&kwargs, "y", None, true)?;
+    let width = coordinate_argument(&kwargs, "w", Some("50%"), false)?;
+    let height = coordinate_argument(&kwargs, "h", Some("50%"), false)?;
+    kwargs.assert_all_used()?;
+    let coordinates = FloatingPaneCoordinates::new(x, y, width, height, None, None)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidOperation, "invalid floating pane size"))?;
+    Ok(ClickAction::OpenOrReloadPlugin { url, coordinates })
+}
+
+fn coordinate_argument(
+    kwargs: &Kwargs,
+    name: &str,
+    default: Option<&str>,
+    allow_zero: bool,
+) -> Result<Option<String>, Error> {
+    let value = kwargs.get::<Option<Value>>(name)?;
+    let value = match value {
+        Some(value) if value.as_str().is_some() => value.as_str().unwrap().to_string(),
+        Some(value) if value.as_i64().is_some_and(|value| value >= 0) => {
+            value.as_i64().unwrap().to_string()
+        },
+        Some(_) => return Err(invalid_coordinate(name)),
+        None => return Ok(default.map(str::to_string)),
+    };
+    let number = if let Some(percent) = value.strip_suffix('%') {
+        let percent = percent
+            .parse::<usize>()
+            .map_err(|_| invalid_coordinate(name))?;
+        if percent > 100 {
+            return Err(invalid_coordinate(name));
+        }
+        percent
+    } else {
+        value
+            .parse::<usize>()
+            .map_err(|_| invalid_coordinate(name))?
+    };
+    if !allow_zero && number == 0 {
+        return Err(invalid_coordinate(name));
+    }
+    Ok(Some(value))
+}
+
+fn invalid_coordinate(name: &str) -> Error {
+    Error::new(
+        ErrorKind::InvalidOperation,
+        format!("{name} expects a non-negative cell count or percentage"),
+    )
 }
 
 fn find_tab(tabs: &[TabInfo], index: usize) -> Result<&TabInfo, Error> {
@@ -349,5 +428,74 @@ mod tests {
         assert!(frame.hitboxes[0]
             .iter()
             .any(|action| action == &Some(ClickAction::SwitchTab(1))));
+    }
+
+    #[test]
+    fn plugin_action_defaults_to_centered_half_screen() {
+        let action = render_plugin_action(
+            r#"{{ Button(on_click=actions.open_or_reload_plugin("session-manager"), label="open") }}"#,
+        );
+        let expected = FloatingPaneCoordinates::new(
+            None,
+            None,
+            Some("50%".to_string()),
+            Some("50%".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            action,
+            ClickAction::OpenOrReloadPlugin {
+                url: "session-manager".to_string(),
+                coordinates: expected,
+            }
+        );
+    }
+
+    #[test]
+    fn plugin_action_accepts_fixed_and_percent_coordinates() {
+        let action = render_plugin_action(
+            r#"{{ Button(on_click=actions.open_or_reload_plugin("session-manager", x=0, y=0, w=32, h="100%"), label="open") }}"#,
+        );
+        let expected = FloatingPaneCoordinates::new(
+            Some("0".to_string()),
+            Some("0".to_string()),
+            Some("32".to_string()),
+            Some("100%".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            action,
+            ClickAction::OpenOrReloadPlugin {
+                url: "session-manager".to_string(),
+                coordinates: expected,
+            }
+        );
+    }
+
+    fn render_plugin_action(template: &str) -> ClickAction {
+        let mode = ModeInfo::default();
+        let mut renderer = TabBarRenderer::from_configuration(&BTreeMap::from([(
+            "template".to_string(),
+            template.to_string(),
+        )]))
+        .unwrap();
+        renderer
+            .render(
+                None,
+                &[],
+                1,
+                20,
+                mode.style.colors,
+                PluginCapabilities { arrow_fonts: false },
+            )
+            .unwrap()
+            .hitboxes[0]
+            .iter()
+            .find_map(Clone::clone)
+            .unwrap()
     }
 }

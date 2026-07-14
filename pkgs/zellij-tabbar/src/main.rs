@@ -2,7 +2,7 @@
 
 mod render;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use render::{ClickAction, RenderedFrame, TabBarRenderer};
@@ -17,6 +17,7 @@ struct State {
     tabbar_renderer: Option<TabBarRenderer>,
     template_error: Option<String>,
     timer_armed: bool,
+    open_plugins: BTreeMap<String, PaneId>,
 }
 
 register_plugin!(State);
@@ -26,32 +27,36 @@ impl ZellijPlugin for State {
         let mut permissions = vec![
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
+            PermissionType::OpenTerminalsOrPlugins,
         ];
         if configuration.contains_key("template_file") {
             permissions.push(PermissionType::FullHdAccess);
         }
-        request_permission(&permissions);
         match TabBarRenderer::from_configuration(&configuration) {
             Ok(renderer) => self.tabbar_renderer = Some(renderer),
             Err(error) => self.template_error = Some(error.to_string()),
         }
 
-        // we dont need to be selectable, since we handle mouse clicks ourselves
-        // in fact, making the pane selectable causes a border to be drawn and for height=1 panes,
-        // this obscures the tab line, so we disable it here
-        set_selectable(false);
-
-        // subscribe to the events we care about
+        // Permission prompts consume y/n through the plugin pane. Keep it selectable until the
+        // result arrives, then return to the borderless mouse-only tabbar.
+        set_selectable(true);
         subscribe(&[
             EventType::TabUpdate,
             EventType::ModeUpdate,
             EventType::Mouse,
+            EventType::PaneUpdate,
+            EventType::PermissionRequestResult,
             EventType::Timer,
         ]);
+        request_permission(&permissions);
     }
 
     fn update(&mut self, event: Event) -> bool {
         match event {
+            Event::PermissionRequestResult(_) => {
+                set_selectable(false);
+                true
+            },
             Event::ModeUpdate(mode_info) => {
                 let changed = self.mode_info != mode_info;
                 self.mode_info = mode_info;
@@ -61,6 +66,19 @@ impl ZellijPlugin for State {
                 self.tabs = tabs;
                 // Always repaint: tab closure can produce an empty or otherwise equal-looking update.
                 true
+            },
+            Event::PaneUpdate(panes) => {
+                let plugin_ids = panes
+                    .panes
+                    .values()
+                    .flatten()
+                    .filter(|pane| pane.is_plugin)
+                    .map(|pane| pane.id)
+                    .collect::<BTreeSet<_>>();
+                self.open_plugins.retain(
+                    |_, pane_id| matches!(pane_id, PaneId::Plugin(id) if plugin_ids.contains(id)),
+                );
+                false
             },
             Event::Timer(_) => {
                 self.timer_armed = false;
@@ -77,6 +95,26 @@ impl ZellijPlugin for State {
                         ClickAction::SwitchTab(index) => switch_tab_to(index as u32),
                         ClickAction::NewTab => {
                             new_tab::<&str>(None, None);
+                        },
+                        ClickAction::OpenOrReloadPlugin { url, coordinates } => {
+                            if let Some(PaneId::Plugin(plugin_id)) =
+                                self.open_plugins.get(&url).cloned()
+                            {
+                                float_multiple_panes(vec![PaneId::Plugin(plugin_id)]);
+                                change_floating_panes_coordinates(vec![(
+                                    PaneId::Plugin(plugin_id),
+                                    coordinates,
+                                )]);
+                                focus_plugin_pane(plugin_id, true, false);
+                                reload_plugin_with_id(plugin_id);
+                            } else if let Some(pane_id) = open_plugin_pane_floating(
+                                &url,
+                                BTreeMap::new(),
+                                Some(coordinates),
+                                BTreeMap::new(),
+                            ) {
+                                self.open_plugins.insert(url, pane_id);
+                            }
                         },
                     }
                 }

@@ -1,0 +1,33 @@
+layout {
+    default_tab_template {
+        pane size=1 borderless=true focus=true {
+            plugin location="file:target/wasm32-wasip1/release/zellij-tabbar.wasm" {
+                template r#"
+{%- call Flex(direction="row") -%}
+  {%- call Button(on_click=actions.open_or_reload_plugin("session-manager", x=0,y=0,w=32,h="100%")) -%}
+    {{- session.name -}}
+  {%- endcall -%}
+
+  {%- call Flex(direction="row", grow=1, overflow="scroll") -%}
+    {%- for tab in session.tabs -%}
+      {%- call Button(
+        on_click=actions.switch_tab(tab.index),
+        focused=tab.active
+      ) -%}
+        {{- tab.name -}}
+      {%- endcall -%}
+    {%- endfor -%}
+  {%- endcall -%}
+
+  {%- call Button(on_click=actions.new_tab()) -%}
+    +
+  {%- endcall -%}
+{%- endcall -%}
+"#
+            }
+        }
+        children
+    }
+}
+
+session_serialization false
