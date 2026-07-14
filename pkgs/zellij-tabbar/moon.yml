@@ -78,7 +78,7 @@ tasks:
       version="${PUBLISH_VERSION:?PUBLISH_VERSION is required}"
       tag="${PUBLISH_RELEASE_TAG:?PUBLISH_RELEASE_TAG is required}"
       ref="${PUBLISH_REF:?PUBLISH_REF is required}"
-      [[ "$target" == zellij-tabbar ]] || { echo "Unexpected publish target '$target'" >&2; exit 1; }
+      [[ "${target}" == zellij-tabbar ]] || { echo "Unexpected publish target '${target}'" >&2; exit 1; }
       [[ "$channel" == next || "$channel" == latest ]] || { echo "Invalid publish channel '$channel'" >&2; exit 1; }
       [[ -n "$version" && -n "$ref" ]]
       wasm_path="$PWD/target/wasm32-wasip1/release/zellij-tabbar.wasm"

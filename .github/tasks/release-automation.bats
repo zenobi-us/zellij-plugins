@@ -122,9 +122,21 @@ EOF
   grep -q '"channel":' "${release}"
   grep -q '"source_branch":' "${release}"
 
-  ! grep -qE 'client_payload\.(tag|version|release_tag|mode)' "${publish}"
-  ! grep -q 'client_payload.source_sha || github.sha' "${publish}"
-  ! grep -q 'client_payload.source_branch || github.ref_name' "${publish}"
-  ! grep -qE 'inputs\.(tag|ref)' "${publish}"
-  ! grep -qE '"(tag|version|release_tag|mode)":' "${release}"
+  run grep -qE 'client_payload\.(tag|version|release_tag|mode)' "${publish}"
+  [ "${status}" -ne 0 ]
+  run grep -q 'client_payload.source_sha || github.sha' "${publish}"
+  [ "${status}" -ne 0 ]
+  run grep -q 'client_payload.source_branch || github.ref_name' "${publish}"
+  [ "${status}" -ne 0 ]
+  run grep -qE 'inputs\.(tag|ref)' "${publish}"
+  [ "${status}" -ne 0 ]
+  run grep -qE '"(tag|version|release_tag|mode)":' "${release}"
+  [ "${status}" -ne 0 ]
+}
+
+@test "publish task preserves shell target variable through Moon token expansion" {
+  expanded="$(cd "${REPO_ROOT}" && moon project zellij-tabbar --json | jq -r '.tasks.publish.script')"
+
+  [[ "${expanded}" == *'[[ "${target}" == zellij-tabbar ]]'* ]]
+  [[ "${expanded}" != *'Unexpected publish target '\''zellij-tabbar:publish'\'''* ]]
 }
