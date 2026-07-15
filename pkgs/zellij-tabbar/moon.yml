@@ -60,16 +60,8 @@ tasks:
       command -v zellij >/dev/null || { echo "zellij is required" >&2; exit 1; }
       command -v ghostty >/dev/null || { echo "ghostty is required" >&2; exit 1; }
       layout_path="$PWD/demo.kdl"
-      cache_home="$PWD/target/demo-cache"
-      socket_dir="$PWD/target/demo-socket"
-      session_name="${ZELLIJ_TABBAR_DEMO_SESSION:-zellij-tabbar-demo-$(date +%s)-$$}"
-      mkdir -p "$cache_home/zellij" "$socket_dir"
-      rm -f "$cache_home/zellij/permissions.kdl"
       ghostty "+new-window" -e env \
-        XDG_CACHE_HOME="$cache_home" \
-        ZELLIJ_SOCKET_DIR="$socket_dir" \
         zellij \
-          --session "$session_name" \
           --new-session-with-layout "$layout_path"
     inputs:
       - "demo.kdl"
