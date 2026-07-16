@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use minijinja::{context, Environment, Error, ErrorKind, Value};
+use zellij_tile::prelude::{ModeInfo, PaletteColor, Styling};
 
 use crate::{file_template_environment, ButtonPresentation, ButtonView, Frame, Renderer, Viewport};
 
@@ -93,6 +94,26 @@ pub struct TemplateTheme {
     pub alert: String,
 }
 
+impl From<&ModeInfo> for TemplateTheme {
+    fn from(mode_info: &ModeInfo) -> Self {
+        Self::from(mode_info.style.colors)
+    }
+}
+
+impl From<Styling> for TemplateTheme {
+    fn from(colors: Styling) -> Self {
+        Self {
+            text: color_token(colors.text_unselected.base),
+            background: color_token(colors.text_unselected.background),
+            active_text: color_token(colors.ribbon_selected.base),
+            active_background: color_token(colors.ribbon_selected.background),
+            muted_text: color_token(colors.ribbon_unselected.base),
+            muted_background: color_token(colors.ribbon_unselected.background),
+            alert: color_token(colors.ribbon_unselected.emphasis_3),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct TemplateContext {
     values: BTreeMap<String, Value>,
@@ -131,7 +152,7 @@ impl<A> TemplateHost<A> {
     pub fn render<F>(
         &mut self,
         context: TemplateContext,
-        theme: TemplateTheme,
+        mode_info: &ModeInfo,
         viewport: Viewport,
         present_button: F,
     ) -> Result<Frame<A>, Error>
@@ -139,6 +160,7 @@ impl<A> TemplateHost<A> {
         A: Clone + Send + 'static,
         F: Fn(ButtonView<'_, A>) -> Result<ButtonPresentation, Error> + Send + Sync + 'static,
     {
+        let theme = TemplateTheme::from(mode_info);
         let mut values = context.values;
         values.insert(
             "env".to_string(),
@@ -171,6 +193,13 @@ impl<A> TemplateHost<A> {
                     .render_named_mut(environment, entry, data, viewport, present_button)
             },
         }
+    }
+}
+
+fn color_token(color: PaletteColor) -> String {
+    match color {
+        PaletteColor::Rgb((r, g, b)) => format!("rgb:{r},{g},{b}"),
+        PaletteColor::EightBit(index) => format!("index:{index}"),
     }
 }
 
@@ -208,6 +237,7 @@ fn plugin_host_path(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use crate::ActionRegistry;
+    use zellij_tile::prelude::{Style, StyleDeclaration};
 
     #[derive(Clone)]
     enum TestAction {}
@@ -244,13 +274,23 @@ mod tests {
             source,
             environment,
         );
+        let mode_info = ModeInfo {
+            style: Style {
+                colors: Styling {
+                    ribbon_unselected: StyleDeclaration {
+                        emphasis_3: PaletteColor::Rgb((1, 2, 3)),
+                        ..StyleDeclaration::default()
+                    },
+                    ..Styling::default()
+                },
+                ..Style::default()
+            },
+            ..ModeInfo::default()
+        };
         let frame = host
             .render(
                 TemplateContext::new().with("session", "demo"),
-                TemplateTheme {
-                    alert: "rgb:1,2,3".to_string(),
-                    ..TemplateTheme::default()
-                },
+                &mode_info,
                 Viewport { rows: 1, cols: 80 },
                 |button| {
                     Ok(ButtonPresentation {
@@ -262,5 +302,31 @@ mod tests {
             .unwrap();
 
         assert_eq!(frame.lines[0], "Etc/UTC rgb:1,2,3 true demo");
+    }
+
+    #[test]
+    fn mode_info_maps_zellij_colors_to_template_tokens() {
+        let mode_info = ModeInfo {
+            style: Style {
+                colors: Styling {
+                    text_unselected: StyleDeclaration {
+                        base: PaletteColor::EightBit(42),
+                        ..StyleDeclaration::default()
+                    },
+                    ribbon_selected: StyleDeclaration {
+                        base: PaletteColor::Rgb((1, 2, 3)),
+                        ..StyleDeclaration::default()
+                    },
+                    ..Styling::default()
+                },
+                ..Style::default()
+            },
+            ..ModeInfo::default()
+        };
+
+        let theme = TemplateTheme::from(&mode_info);
+
+        assert_eq!(theme.text, "index:42");
+        assert_eq!(theme.active_text, "rgb:1,2,3");
     }
 }

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use zellij_template_render::{
     error_frame as render_error_frame, ActionRegistry, ButtonPresentation, ButtonView, Environment,
     Error, ErrorKind, Frame, Renderer, TemplateContext, TemplateEnvironment, TemplateHost,
-    TemplateSource, TemplateTheme, Value, Viewport,
+    TemplateSource, Value, Viewport,
 };
 use zellij_tile::prelude::*;
 use zellij_tile_utils::style;
@@ -88,15 +88,13 @@ impl TabBarRenderer {
     /// Renders tabbar data through the shared template renderer.
     pub(crate) fn render(
         &mut self,
-        session_name: Option<&str>,
+        mode_info: &ModeInfo,
         tabs: &[TabInfo],
         rows: usize,
         cols: usize,
-        colors: Styling,
-        capabilities: PluginCapabilities,
     ) -> Result<RenderedFrame, Error> {
         let model = TemplateSession {
-            name: session_name.unwrap_or_default(),
+            name: mode_info.session_name.as_deref().unwrap_or_default(),
             tabs: tabs
                 .iter()
                 .map(|tab| TemplateTab {
@@ -106,20 +104,13 @@ impl TabBarRenderer {
                 })
                 .collect(),
         };
-        let theme = TemplateTheme {
-            text: color_token(colors.text_unselected.base),
-            background: color_token(colors.text_unselected.background),
-            active_text: color_token(colors.ribbon_selected.base),
-            active_background: color_token(colors.ribbon_selected.background),
-            muted_text: color_token(colors.ribbon_unselected.base),
-            muted_background: color_token(colors.ribbon_unselected.background),
-            alert: color_token(colors.ribbon_unselected.emphasis_3),
-        };
         let tabs = tabs.to_vec();
+        let colors = mode_info.style.colors;
+        let capabilities = mode_info.capabilities;
         let viewport = Viewport { rows, cols };
         self.host.render(
             TemplateContext::new().with("session", Value::from_serialize(model)),
-            theme,
+            mode_info,
             viewport,
             move |button| present_button(button, &tabs, colors, capabilities),
         )
@@ -301,13 +292,6 @@ fn find_tab(tabs: &[TabInfo], index: usize) -> Result<&TabInfo, Error> {
         })
 }
 
-fn color_token(color: PaletteColor) -> String {
-    match color {
-        PaletteColor::Rgb((r, g, b)) => format!("rgb:{r},{g},{b}"),
-        PaletteColor::EightBit(index) => format!("index:{index}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,17 +346,14 @@ mod tests {
             position: 1,
             ..TabInfo::default()
         };
-        let mode = ModeInfo::default();
+        let mode = ModeInfo {
+            session_name: Some("demo".to_string()),
+            capabilities: PluginCapabilities { arrow_fonts: false },
+            ..ModeInfo::default()
+        };
         let frame = TabBarRenderer::from_configuration(&BTreeMap::new())
             .unwrap()
-            .render(
-                Some("demo"),
-                &[first, second],
-                1,
-                80,
-                mode.style.colors,
-                PluginCapabilities { arrow_fonts: false },
-            )
+            .render(&mode, &[first, second], 1, 80)
             .unwrap();
         assert!(plain_text(&frame.lines[0]).contains("one"));
         assert!(frame.hitboxes[0]
@@ -388,17 +369,16 @@ mod tests {
 
     #[test]
     fn shared_host_supplies_top_level_theme() {
-        let mode = ModeInfo::default();
+        let mode = ModeInfo {
+            capabilities: PluginCapabilities { arrow_fonts: false },
+            ..ModeInfo::default()
+        };
         let mut renderer = TabBarRenderer::from_configuration(&BTreeMap::from([(
             "template".to_string(),
             r#"{{ "x" | fg(theme.text) }}"#.to_string(),
         )]))
         .unwrap();
-        let capabilities = PluginCapabilities { arrow_fonts: false };
-
-        let frame = renderer
-            .render(None, &[], 1, 20, mode.style.colors, capabilities)
-            .unwrap();
+        let frame = renderer.render(&mode, &[], 1, 20).unwrap();
         assert!(plain_text(&frame.lines[0]).contains('x'));
     }
 
@@ -415,16 +395,7 @@ mod tests {
             r#"{% call Flex(overflow="scroll") %}{% call Button(on_click=actions.switch_tab(1)) %}one{% endcall %}{% endcall %}"#.to_string(),
         )]))
         .unwrap();
-        let frame = renderer
-            .render(
-                None,
-                &[tab],
-                1,
-                3,
-                mode.style.colors,
-                PluginCapabilities { arrow_fonts: true },
-            )
-            .unwrap();
+        let frame = renderer.render(&mode, &[tab], 1, 3).unwrap();
         assert!(frame.hitboxes[0]
             .iter()
             .any(|action| action == &Some(ClickAction::SwitchTab(1))));
@@ -477,23 +448,16 @@ mod tests {
     }
 
     fn render_plugin_action(template: &str) -> ClickAction {
-        let mode = ModeInfo::default();
+        let mode = ModeInfo {
+            capabilities: PluginCapabilities { arrow_fonts: false },
+            ..ModeInfo::default()
+        };
         let mut renderer = TabBarRenderer::from_configuration(&BTreeMap::from([(
             "template".to_string(),
             template.to_string(),
         )]))
         .unwrap();
-        renderer
-            .render(
-                None,
-                &[],
-                1,
-                20,
-                mode.style.colors,
-                PluginCapabilities { arrow_fonts: false },
-            )
-            .unwrap()
-            .hitboxes[0]
+        renderer.render(&mode, &[], 1, 20).unwrap().hitboxes[0]
             .iter()
             .find_map(Clone::clone)
             .unwrap()

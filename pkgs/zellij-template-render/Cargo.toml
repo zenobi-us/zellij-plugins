@@ -10,6 +10,7 @@ chrono = "0.4"
 chrono-tz = "0.10"
 minijinja = "2.21"
 unicode-width = "0.1.8"
+zellij-tile = { git = "https://github.com/zellij-org/zellij", rev = "4bfda976b110b5d3182fca004ee7031f6322253e" }
 
 [lints.clippy]
 too_many_arguments = "allow"

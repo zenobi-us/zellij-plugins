@@ -2602,6 +2602,7 @@ dependencies = [
  "chrono-tz",
  "minijinja",
  "unicode-width",
+ "zellij-tile",
 ]
 
 [[package]]

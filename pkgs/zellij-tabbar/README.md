@@ -201,17 +201,17 @@ Missing or runtime-hidden variables remain undefined. Do not allowlist secrets: 
 
 ## Theme
 
-The top-level `theme` object exposes colours derived from the active Zellij theme. Use these values with the `fg` and `bg` filters; they are colour tokens shaped as `rgb:R,G,B` or `index:N`.
+The top-level `theme` object exposes semantic colours derived by `zellij-template-render` from the latest Zellij `ModeInfo`. Use these values with the `fg` and `bg` filters.
 
-| Property | Use |
-|---|---|
-| `theme.text` | Default foreground |
-| `theme.background` | Default background |
-| `theme.active_text` | Foreground for the active or focused item |
-| `theme.active_background` | Background for the active or focused item |
-| `theme.muted_text` | Foreground for inactive or secondary content |
-| `theme.muted_background` | Background for inactive or secondary content |
-| `theme.alert` | Warning or attention colour |
+| Property | Use | Zellij source |
+|---|---|---|
+| `theme.text` | Default foreground | `text_unselected.base` |
+| `theme.background` | Default background | `text_unselected.background` |
+| `theme.active_text` | Foreground for the active or focused item | `ribbon_selected.base` |
+| `theme.active_background` | Background for the active or focused item | `ribbon_selected.background` |
+| `theme.muted_text` | Foreground for inactive or secondary content | `ribbon_unselected.base` |
+| `theme.muted_background` | Background for inactive or secondary content | `ribbon_unselected.background` |
+| `theme.alert` | Warning or attention colour | `ribbon_unselected.emphasis_3` |
 
 Apply foreground and background colours by piping text through filters:
 
@@ -222,6 +222,8 @@ Apply foreground and background colours by piping text through filters:
 ```
 
 Choose colours by meaning rather than by expected RGB value. Zellij users can change themes, and the same template follows their active palette automatically. `theme` is top-level; `context.theme` is unsupported.
+
+Filters also accept explicit `rgb:R,G,B` and `index:N` strings. `index:N` is the xterm 256-colour palette: `0`–`15` are terminal-configured ANSI colours, `16`–`231` are the 6×6×6 colour cube, and `232`–`255` are grayscale. See the [renderer colour contract](../zellij-template-render/README.md#colour-contract) and [xterm reference](https://invisible-island.net/xterm/xterm.faq.html). Use `theme.active_text`, not the quoted string `"theme.active_text"`.
 
 ## Components
 

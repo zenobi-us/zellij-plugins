@@ -10,11 +10,11 @@ The crate provides:
 - ANSI-aware measurement and clipping
 - `Clock(format=..., tz=...)` with IANA timezone support and host-scheduled refresh metadata; `tz` defaults to `env.TZ`, then UTC
 - `bold`, `dim`, `fg`, `bg`, and time-format filters
-- `TemplateHost` ownership of template sources, external loading, environment allowlists, and shared `theme`, `env`, and `system` context
+- `TemplateHost` ownership of template sources, external loading, environment allowlists, and shared `theme`, `env`, and `system` context derived from Zellij `ModeInfo`
 
-Plugins own template data, action semantics, and button presentation. The renderer does not depend on `zellij-tile`.
+Plugins own template data, action semantics, button presentation, and the `ModeInfo` event lifecycle. The renderer converts the current `ModeInfo` into its template colour contract.
 
-Use low-level `Renderer` methods for standalone strings. Zellij plugins should normally construct a `TemplateHost` from `TemplateSource`, `TemplateEnvironment`, and `TemplateTheme`. The host validates `template`/`template_file`, defaults the environment allowlist to `TZ`, `LANG`, and `TERM`, and retains named environments so includes remain cached.
+Use low-level `Renderer` methods for standalone strings. Zellij plugins should normally construct a `TemplateHost` from `TemplateSource` and `TemplateEnvironment`, then pass the latest `ModeInfo` when rendering. The host validates `template`/`template_file`, defaults the environment allowlist to `TZ`, `LANG`, and `TERM`, and retains named environments so includes remain cached.
 
 ```rust
 use zellij_template_render::{
@@ -84,21 +84,33 @@ Basic row with fixed edges and a flexible centre:
 
 Use `grow=1` on the region that should consume remaining width. Use `shrink=0` on controls that must remain visible. With `overflow="scroll"`, the viewport follows the descendant `Button` whose resolved focus state is true. There is no separate mouse-controlled scroll position.
 
-## Theme data
+## Colour contract
 
-`zellij-template-render` does not create theme data. The host plugin supplies it as template data. `zellij-tabbar` exposes the active Zellij theme through the top-level `theme` variable:
+`TemplateHost::render` accepts the current Zellij `ModeInfo` and exposes semantic colours through the top-level `theme` object. Consumers do not map `ModeInfo.style.colors` themselves.
 
-| Variable | Meaning |
-|---|---|
-| `theme.text` | Default foreground colour |
-| `theme.background` | Default background colour |
-| `theme.active_text` | Foreground colour for active items |
-| `theme.active_background` | Background colour for active items |
-| `theme.muted_text` | Foreground colour for inactive or secondary items |
-| `theme.muted_background` | Background colour for inactive or secondary items |
-| `theme.alert` | Emphasis colour for alerts |
+| Variable | Meaning | Zellij source |
+|---|---|---|
+| `theme.text` | Default foreground colour | `text_unselected.base` |
+| `theme.background` | Default background colour | `text_unselected.background` |
+| `theme.active_text` | Foreground colour for active items | `ribbon_selected.base` |
+| `theme.active_background` | Background colour for active items | `ribbon_selected.background` |
+| `theme.muted_text` | Foreground colour for inactive or secondary items | `ribbon_unselected.base` |
+| `theme.muted_background` | Background colour for inactive or secondary items | `ribbon_unselected.background` |
+| `theme.alert` | Emphasis colour for alerts | `ribbon_unselected.emphasis_3` |
 
-Values are renderer colour tokens shaped as `rgb:R,G,B` or `index:N` and can be passed to `fg` and `bg`:
+The `fg` and `bg` filters accept three colour sources:
+
+```jinja
+{{ "explicit RGB" | fg("rgb:255,128,0") }}
+{{ "terminal palette" | fg("index:208") }}
+{{ "active theme" | fg(theme.active_text) }}
+```
+
+- `rgb:R,G,B` uses three decimal channels from `0` to `255`.
+- `index:N` uses an xterm 256-colour palette index from `0` to `255`. Indices `0`–`15` are controlled by the terminal theme, `16`–`231` form the 6×6×6 colour cube, and `232`–`255` form the grayscale ramp. See the [xterm 256-colour reference](https://invisible-island.net/xterm/xterm.faq.html).
+- `theme.<role>` is a MiniJinja value derived from the active Zellij theme. It resolves to either an `rgb:R,G,B` or `index:N` token before reaching `fg` or `bg`; do not quote it as a string.
+
+Theme values can be chained with other filters:
 
 ```jinja
 {{ "normal" | fg(theme.text) | bg(theme.background) }}
@@ -106,7 +118,7 @@ Values are renderer colour tokens shaped as `rgb:R,G,B` or `index:N` and can be 
 {{ "warning" | fg(theme.alert) }}
 ```
 
-`theme` is top-level. The removed `context.theme.*` path is unsupported and produces a template error.
+`theme` is top-level. The removed `context.theme.*` path and string values such as `"theme.active_text"` are unsupported.
 
 ## Template sources
 

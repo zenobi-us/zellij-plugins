@@ -130,14 +130,7 @@ impl ZellijPlugin for State {
             self.frame = RenderedFrame::default();
         } else {
             self.frame = if let Some(renderer) = &mut self.tabbar_renderer {
-                match renderer.render(
-                    self.mode_info.session_name.as_deref(),
-                    &self.tabs,
-                    rows,
-                    cols,
-                    self.mode_info.style.colors,
-                    self.mode_info.capabilities,
-                ) {
+                match renderer.render(&self.mode_info, &self.tabs, rows, cols) {
                     Ok(frame) => frame,
                     Err(error) => renderer.error_frame(&error, rows, cols),
                 }
