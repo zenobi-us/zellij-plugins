@@ -171,6 +171,7 @@ jobs:
       - name: Publish target
         env:
           GH_TOKEN: ${{ github.token }}
+          CI: ""
         run: |
           set -euo pipefail
           moon run "${PUBLISH_TARGET}:publish" --force
