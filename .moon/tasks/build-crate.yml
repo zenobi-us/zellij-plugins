@@ -1,0 +1,15 @@
+inheritedBy:
+  tags:
+    - builds-crate
+
+tasks:
+  build:
+    type: build
+    script: |
+      set -euo pipefail
+      host_target="$(rustc -vV | awk '/^host:/ {print $2}')"
+      CARGO_TARGET_DIR="$PWD/target" cargo build --release --target "$host_target"
+    inputs:
+      - "/Cargo.lock"
+      - "Cargo.toml"
+      - "src/**/*.rs"

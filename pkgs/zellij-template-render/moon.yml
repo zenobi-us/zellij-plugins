@@ -4,6 +4,10 @@ $schema: "file://../../.moon/cache/schemas/project.json"
 language: rust
 layer: library
 
+tags:
+  - builds-crate
+  - publishes-crate
+
 tasks:
   check:
     script: |
@@ -22,3 +26,7 @@ tasks:
     inputs:
       - "Cargo.toml"
       - "src/**/*.rs"
+
+  publish:
+    deps:
+      - "~:publish-crate"

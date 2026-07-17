@@ -19,6 +19,7 @@ tasks:
 
       [[ "${target}" == "${MOON_PROJECT_ID}" ]] || { echo "Unexpected publish target '${target}' for '${MOON_PROJECT_ID}'" >&2; exit 1; }
       [[ "$(git rev-parse HEAD)" == "${ref}" ]] || { echo "PUBLISH_REF does not match HEAD" >&2; exit 1; }
+      [[ -z "$(git status --porcelain)" ]] || { echo "Publishing requires a clean worktree" >&2; exit 1; }
       [[ "${tag}" == "${target}-v${version}" ]] || { echo "Unexpected release tag '${tag}'" >&2; exit 1; }
       case "${channel}" in
         latest)
@@ -41,11 +42,16 @@ tasks:
       )"
       [[ "${package_name}" == "${target}" ]] || { echo "Cargo package '${package_name}' does not match Moon target '${target}'" >&2; exit 1; }
 
+      workspace_manifest="$(cargo locate-project --workspace --message-format plain)"
+      lockfile="$(dirname "$workspace_manifest")/Cargo.lock"
       manifest_backup="$(mktemp)"
+      lockfile_backup="$(mktemp)"
       cp "$manifest" "$manifest_backup"
+      cp "$lockfile" "$lockfile_backup"
       cleanup() {
         cp "$manifest_backup" "$manifest"
-        rm -f "$manifest_backup"
+        cp "$lockfile_backup" "$lockfile"
+        rm -f "$manifest_backup" "$lockfile_backup"
       }
       trap cleanup EXIT
 
@@ -74,4 +80,5 @@ tasks:
       )"
       [[ "${resolved_version}" == "${version}" ]] || { echo "Cargo resolved version '${resolved_version}', expected '${version}'" >&2; exit 1; }
 
+      cargo publish --dry-run --manifest-path "$manifest" --allow-dirty
       cargo publish --manifest-path "$manifest" --allow-dirty
