@@ -6,8 +6,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use zellij_template_render::{
     error_frame as render_error_frame, ActionRegistry, ButtonPresentation, ButtonView, Environment,
-    Error, ErrorKind, Frame, Renderer, TemplateContext, TemplateEnvironment, TemplateHost,
-    TemplateSource, Value, Viewport,
+    Error, ErrorKind, Frame, Renderer, TemplateContext, TemplateHost, Value, Viewport,
 };
 use zellij_tile::prelude::*;
 use zellij_tile_utils::style;
@@ -52,10 +51,8 @@ impl TabBarRenderer {
     ) -> Result<Self, Error> {
         let mut embedded = Environment::new();
         minijinja_embed::load_templates!(&mut embedded);
-        let source =
-            TemplateSource::from_configuration(configuration, embedded, DEFAULT_TEMPLATE_NAME)?;
         Ok(Self {
-            host: TemplateHost::new(
+            host: TemplateHost::from_configuration(
                 Renderer::new(
                     ActionRegistry::new()
                         .with("switch_tab", |args| {
@@ -79,9 +76,10 @@ impl TabBarRenderer {
                         })
                         .with("open_or_reload_plugin", decode_open_or_reload_plugin),
                 ),
-                source,
-                TemplateEnvironment::from_configuration(configuration),
-            ),
+                configuration,
+                embedded,
+                DEFAULT_TEMPLATE_NAME,
+            )?,
         })
     }
 
@@ -117,7 +115,9 @@ impl TabBarRenderer {
     }
 
     pub(crate) fn error_frame(&self, error: &Error, rows: usize, cols: usize) -> RenderedFrame {
-        render_error_frame(error, Viewport { rows, cols })
+        let mut frame = render_error_frame(error, Viewport { rows, cols });
+        frame.refresh_after = self.host.refresh_after();
+        frame
     }
 }
 
@@ -294,6 +294,9 @@ fn find_tab(tabs: &[TabInfo], index: usize) -> Result<&TabInfo, Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
     use super::*;
 
     fn plain_text(value: &str) -> String {
@@ -365,6 +368,34 @@ mod tests {
         assert!(frame.refresh_after.is_some_and(|delay| {
             !delay.is_zero() && delay <= std::time::Duration::from_secs(60)
         }));
+    }
+
+    #[test]
+    fn external_template_error_frame_keeps_reload_timer() {
+        let directory = std::env::temp_dir().join(format!(
+            "zellij-tabbar-reload-error-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let entry = directory.join("main.jinja");
+        fs::write(&entry, "{{").unwrap();
+        let mut renderer = TabBarRenderer::from_configuration(&BTreeMap::from([(
+            "template_file".to_string(),
+            entry.to_string_lossy().into_owned(),
+        )]))
+        .unwrap();
+        let error = renderer
+            .render(&ModeInfo::default(), &[], 1, 80)
+            .err()
+            .unwrap();
+        let frame = renderer.error_frame(&error, 1, 80);
+
+        assert_eq!(frame.refresh_after, Some(Duration::from_secs(1)));
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

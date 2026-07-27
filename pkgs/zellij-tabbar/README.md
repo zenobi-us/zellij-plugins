@@ -157,9 +157,9 @@ plugin location="file:/home/you/.config/zellij/plugins/zellij-tabbar.wasm" {
 }
 ```
 
-Relative paths use `${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}`. Absolute paths and `~` are supported. Includes, imports, and inheritance resolve relative to the including file, load lazily, and remain cached until the plugin reloads. External templates are trusted: they can read any host file available to the plugin. `template` and `template_file` cannot be used together.
+Relative paths use `${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}`. Absolute paths and `~` are supported. Includes, imports, and inheritance resolve relative to the including file and load lazily. The plugin checks loaded external template files before rendering and schedules a render roughly once per second, then reloads the complete template cache when any content changes. External templates are trusted: they can read any host file available to the plugin. `template` and `template_file` cannot be used together.
 
-Invalid configuration, unreadable files, and template failures render a visible `template error:` message instead of silently using the default.
+Invalid configuration, unreadable files, and template failures render a visible `template error:` message instead of silently using the default. File checks continue while an error is visible, so fixing or restoring the template reloads it without restarting the plugin.
 
 ## Template data
 
