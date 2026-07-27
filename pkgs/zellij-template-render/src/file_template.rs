@@ -16,6 +16,20 @@ pub fn environment<R>(
 where
     R: Fn(&Path) -> io::Result<String> + Send + Sync + 'static,
 {
+    let (environment, entry_name) = environment_unchecked(entry, home, read)?;
+    environment.get_template(&entry_name)?;
+    Ok((environment, entry_name))
+}
+
+/// Builds an environment without loading the entry so callers can recover from initial errors.
+pub(crate) fn environment_unchecked<R>(
+    entry: PathBuf,
+    home: Option<PathBuf>,
+    read: R,
+) -> Result<(Environment<'static>, String), Error>
+where
+    R: Fn(&Path) -> io::Result<String> + Send + Sync + 'static,
+{
     let home = Arc::new(home);
     let entry = expand_home(&entry, home.as_deref())?;
     let entry_name = entry.to_string_lossy().into_owned();
@@ -46,7 +60,6 @@ where
         };
         Cow::Owned(normalize(path).to_string_lossy().into_owned())
     });
-    environment.get_template(&entry_name)?;
     Ok((environment, entry_name))
 }
 

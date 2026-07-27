@@ -14,7 +14,7 @@ The crate provides:
 
 Plugins own template data, action semantics, button presentation, and the `ModeInfo` event lifecycle. The renderer converts the current `ModeInfo` into its template colour contract.
 
-Use low-level `Renderer` methods for standalone strings. Zellij plugins should normally construct a `TemplateHost` from `TemplateSource` and `TemplateEnvironment`, then pass the latest `ModeInfo` when rendering. The host validates `template`/`template_file`, defaults the environment allowlist to `TZ`, `LANG`, and `TERM`, and retains named environments so includes remain cached.
+Use low-level `Renderer` methods for standalone strings. Zellij plugins should normally use `TemplateHost::from_configuration`, then pass the latest `ModeInfo` when rendering. The configured host validates `template`/`template_file`, defaults the environment allowlist to `TZ`, `LANG`, and `TERM`, retains embedded environments, and automatically invalidates external template caches when loaded file contents change.
 
 ```rust
 use zellij_template_render::{
@@ -128,7 +128,7 @@ Use these terms consistently:
 
 - **inline template**: source supplied directly through plugin configuration
 - **embedded template**: a named source file bundled into the plugin WASM at build time
-- **external template**: a source file read from the host filesystem at plugin load time
+- **external template**: a source file read from the host filesystem at runtime
 
 An embedded template is no longer read from disk at runtime. `minijinja-embed` packages template sources inside the WASM and loads them into a MiniJinja environment.
 
@@ -139,8 +139,8 @@ The plugin host owns template selection and maps host paths into its filesystem 
 ```text
 plugin configuration
   ├─ inline template ─────────────────────→ Renderer::render(...)
-  ├─ external template → file environment → Renderer::render_named(...)
-  └─ no override → embedded environment ──→ Renderer::render_named(...)
+  ├─ external template → tracked environment → Renderer::render_named(...)
+  └─ no override → embedded environment ─────→ Renderer::render_named(...)
 ```
 
 Embed a template directory from the consuming plugin's `build.rs`:
@@ -176,13 +176,15 @@ let (mut environment, entry) = file_template_environment(
 renderer.render_named_mut(&mut environment, &entry, data, viewport, present_button)?;
 ```
 
-The environment validates the entry immediately. Includes, imports, and inheritance resolve relative to the including file. MiniJinja loads each template name once and caches it for the environment lifetime. The reader controls host path mapping; a Zellij WASI plugin maps host paths through `/host` and requests `FullHdAccess`.
+The low-level environment validates the entry immediately. Includes, imports, and inheritance resolve relative to the including file. MiniJinja loads each template name once and caches it for the environment lifetime. The reader controls host path mapping; a Zellij WASI plugin maps host paths through `/host` and requests `FullHdAccess`.
+
+`TemplateHost::from_configuration` adds automatic external reload. It records every entry, include, import, and parent file loaded by MiniJinja, compares their contents before each render, and calls `Environment::clear_templates()` after a change. External sources request another render after one second so checks continue without other host events. Missing and invalid files remain tracked, allowing a visible template error to recover after the file is fixed or restored. Inline and embedded templates do not request this polling timer.
 
 Host implementations should:
 
 - reject configuration containing both inline and external template settings
-- create one external environment during plugin load unless hot reload is explicitly required
 - report read and parse failures instead of silently falling back to the embedded default
+- preserve `TemplateHost::refresh_after()` on error frames so reload polling continues
 - define whether configured paths are relative to Zellij's host folder; arbitrary absolute host paths can require `/host` remapping and `FullHdAccess`
 
 ### Includes and inheritance

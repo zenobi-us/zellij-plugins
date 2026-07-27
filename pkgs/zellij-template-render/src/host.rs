@@ -1,15 +1,20 @@
 //! High-level template source, environment, and shared context management.
 
 use std::collections::BTreeMap;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use chrono::Utc;
 use minijinja::{context, Environment, Error, ErrorKind, Value};
 use zellij_tile::prelude::{ModeInfo, PaletteColor, Styling};
 
-use crate::{file_template_environment, ButtonPresentation, ButtonView, Frame, Renderer, Viewport};
+use crate::file_template::{environment as file_template_environment, environment_unchecked};
+use crate::{ButtonPresentation, ButtonView, Frame, Renderer, Viewport};
 
 const DEFAULT_ENVIRONMENT_VARIABLES: [&str; 3] = ["TZ", "LANG", "TERM"];
+const EXTERNAL_TEMPLATE_REFRESH: Duration = Duration::from_secs(1);
 
 pub enum TemplateSource {
     Inline(String),
@@ -17,6 +22,16 @@ pub enum TemplateSource {
         environment: Box<Environment<'static>>,
         entry: String,
     },
+}
+
+struct ExternalTemplateReload {
+    files: Arc<Mutex<BTreeMap<PathBuf, FileSnapshot>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum FileSnapshot {
+    Contents(String),
+    Error(io::ErrorKind),
 }
 
 impl TemplateSource {
@@ -134,6 +149,7 @@ pub struct TemplateHost<A> {
     renderer: Renderer<A>,
     source: TemplateSource,
     environment: TemplateEnvironment,
+    external_reload: Option<ExternalTemplateReload>,
 }
 
 impl<A> TemplateHost<A> {
@@ -146,6 +162,52 @@ impl<A> TemplateHost<A> {
             renderer,
             source,
             environment,
+            external_reload: None,
+        }
+    }
+
+    /// Builds a configured host with automatic reload for external templates.
+    pub fn from_configuration(
+        renderer: Renderer<A>,
+        configuration: &BTreeMap<String, String>,
+        embedded: Environment<'static>,
+        embedded_entry: impl Into<String>,
+    ) -> Result<Self, Error> {
+        let environment = TemplateEnvironment::from_configuration(configuration);
+        match (
+            configuration.get("template"),
+            configuration.get("template_file"),
+        ) {
+            (Some(_), Some(_)) => Err(Error::new(
+                ErrorKind::InvalidOperation,
+                "template and template_file cannot be configured together",
+            )),
+            (Some(source), None) => Ok(Self::new(
+                renderer,
+                TemplateSource::Inline(source.clone()),
+                environment,
+            )),
+            (None, Some(path)) => {
+                let (template_environment, entry, external_reload) =
+                    load_reloadable_external_template(path)?;
+                Ok(Self {
+                    renderer,
+                    source: TemplateSource::Named {
+                        environment: Box::new(template_environment),
+                        entry,
+                    },
+                    environment,
+                    external_reload: Some(external_reload),
+                })
+            },
+            (None, None) => Ok(Self::new(
+                renderer,
+                TemplateSource::Named {
+                    environment: Box::new(embedded),
+                    entry: embedded_entry.into(),
+                },
+                environment,
+            )),
         }
     }
 
@@ -160,6 +222,8 @@ impl<A> TemplateHost<A> {
         A: Clone + Send + 'static,
         F: Fn(ButtonView<'_, A>) -> Result<ButtonPresentation, Error> + Send + Sync + 'static,
     {
+        self.reload_if_changed()?;
+        let reload_after = self.refresh_after();
         let theme = TemplateTheme::from(mode_info);
         let mut values = context.values;
         values.insert(
@@ -184,7 +248,7 @@ impl<A> TemplateHost<A> {
         );
         let data = Value::from_iter(values);
 
-        match &mut self.source {
+        let mut frame = match &mut self.source {
             TemplateSource::Inline(source) => {
                 self.renderer.render(source, data, viewport, present_button)
             },
@@ -192,7 +256,60 @@ impl<A> TemplateHost<A> {
                 self.renderer
                     .render_named_mut(environment, entry, data, viewport, present_button)
             },
+        }?;
+        if let Some(reload_after) = reload_after {
+            frame.refresh_after = Some(
+                frame
+                    .refresh_after
+                    .map_or(reload_after, |current| current.min(reload_after)),
+            );
         }
+        Ok(frame)
+    }
+
+    /// Returns the polling delay required to keep external template reload active.
+    pub fn refresh_after(&self) -> Option<Duration> {
+        self.external_reload
+            .as_ref()
+            .map(|_| EXTERNAL_TEMPLATE_REFRESH)
+    }
+
+    fn reload_if_changed(&mut self) -> Result<(), Error> {
+        let Some(reload) = &self.external_reload else {
+            return Ok(());
+        };
+        let changed = reload.changed()?;
+        if changed {
+            let TemplateSource::Named { environment, .. } = &mut self.source else {
+                return Err(Error::new(
+                    ErrorKind::InvalidOperation,
+                    "external template reload requires a named environment",
+                ));
+            };
+            environment.clear_templates();
+            reload.clear()?;
+        }
+        Ok(())
+    }
+}
+
+impl ExternalTemplateReload {
+    fn changed(&self) -> Result<bool, Error> {
+        let files = self
+            .files
+            .lock()
+            .map_err(|_| template_reload_lock_error())?;
+        Ok(files
+            .iter()
+            .any(|(path, previous)| snapshot_external_template(path) != *previous))
+    }
+
+    fn clear(&self) -> Result<(), Error> {
+        self.files
+            .lock()
+            .map_err(|_| template_reload_lock_error())?
+            .clear();
+        Ok(())
     }
 }
 
@@ -204,6 +321,29 @@ fn color_token(color: PaletteColor) -> String {
 }
 
 fn load_external_template(path: &str) -> Result<(Environment<'static>, String), Error> {
+    let (entry, home) = resolve_external_template_path(path)?;
+    file_template_environment(entry, home, read_external_template)
+}
+
+fn load_reloadable_external_template(
+    path: &str,
+) -> Result<(Environment<'static>, String, ExternalTemplateReload), Error> {
+    let (entry, home) = resolve_external_template_path(path)?;
+    let files = Arc::new(Mutex::new(BTreeMap::new()));
+    let loader_files = Arc::clone(&files);
+    let (environment, entry) = environment_unchecked(entry, home, move |path| {
+        let result = read_external_template(path);
+        let snapshot = snapshot_result(&result);
+        loader_files
+            .lock()
+            .map_err(|_| io::Error::other("template reload lock poisoned"))?
+            .insert(path.to_path_buf(), snapshot);
+        result
+    })?;
+    Ok((environment, entry, ExternalTemplateReload { files }))
+}
+
+fn resolve_external_template_path(path: &str) -> Result<(PathBuf, Option<PathBuf>), Error> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut entry = PathBuf::from(path);
     if entry.is_relative() && !entry.starts_with("~") {
@@ -218,9 +358,26 @@ fn load_external_template(path: &str) -> Result<(Environment<'static>, String), 
             })?;
         entry = config_dir.join(entry);
     }
-    file_template_environment(entry, home, |path| {
-        std::fs::read_to_string(plugin_host_path(path))
-    })
+    Ok((entry, home))
+}
+
+fn read_external_template(path: &Path) -> io::Result<String> {
+    std::fs::read_to_string(plugin_host_path(path))
+}
+
+fn snapshot_external_template(path: &Path) -> FileSnapshot {
+    snapshot_result(&read_external_template(path))
+}
+
+fn snapshot_result(result: &io::Result<String>) -> FileSnapshot {
+    match result {
+        Ok(contents) => FileSnapshot::Contents(contents.clone()),
+        Err(error) => FileSnapshot::Error(error.kind()),
+    }
+}
+
+fn template_reload_lock_error() -> Error {
+    Error::new(ErrorKind::InvalidOperation, "template reload lock poisoned")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -235,12 +392,147 @@ fn plugin_host_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
     use crate::ActionRegistry;
     use zellij_tile::prelude::{Style, StyleDeclaration};
 
     #[derive(Clone)]
     enum TestAction {}
+
+    fn temp_template_directory(name: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "zellij-template-render-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    fn external_host(entry: &Path) -> TemplateHost<TestAction> {
+        let configuration = BTreeMap::from([(
+            "template_file".to_string(),
+            entry.to_string_lossy().into_owned(),
+        )]);
+        TemplateHost::from_configuration(
+            Renderer::new(ActionRegistry::<TestAction>::new()),
+            &configuration,
+            Environment::new(),
+            "main.jinja",
+        )
+        .unwrap()
+    }
+
+    fn render_external(host: &mut TemplateHost<TestAction>) -> Result<Frame<TestAction>, Error> {
+        host.render(
+            TemplateContext::new(),
+            &ModeInfo::default(),
+            Viewport { rows: 1, cols: 10 },
+            |button| {
+                Ok(ButtonPresentation {
+                    label: button.label.to_string(),
+                    focused: false,
+                })
+            },
+        )
+    }
+
+    #[test]
+    fn external_template_reloads_changed_include() {
+        let directory = temp_template_directory("reload");
+        let entry = directory.join("main.jinja");
+        let include = directory.join("part.jinja");
+        fs::write(&entry, "{% include 'part.jinja' %}").unwrap();
+        fs::write(&include, "one").unwrap();
+        let mut host = external_host(&entry);
+
+        assert_eq!(render_external(&mut host).unwrap().lines, ["one"]);
+        fs::write(&include, "two").unwrap();
+        assert_eq!(render_external(&mut host).unwrap().lines, ["two"]);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn external_template_recovers_after_missing_include_is_restored() {
+        let directory = temp_template_directory("recovery");
+        let entry = directory.join("main.jinja");
+        let include = directory.join("part.jinja");
+        fs::write(&entry, "{% include 'part.jinja' %}").unwrap();
+        fs::write(&include, "one").unwrap();
+        let mut host = external_host(&entry);
+
+        assert_eq!(render_external(&mut host).unwrap().lines, ["one"]);
+        fs::remove_file(&include).unwrap();
+        assert!(render_external(&mut host).is_err());
+        fs::write(&include, "two").unwrap();
+        assert_eq!(render_external(&mut host).unwrap().lines, ["two"]);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn initially_invalid_external_template_recovers_after_edit() {
+        let directory = temp_template_directory("initial-error");
+        let entry = directory.join("main.jinja");
+        fs::write(&entry, "{{").unwrap();
+        let mut host = external_host(&entry);
+
+        assert!(render_external(&mut host).is_err());
+        fs::write(&entry, "fixed").unwrap();
+        assert_eq!(render_external(&mut host).unwrap().lines, ["fixed"]);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn unchanged_external_template_keeps_cached_templates() {
+        let directory = temp_template_directory("cache");
+        let entry = directory.join("main.jinja");
+        let include = directory.join("part.jinja");
+        fs::write(&entry, "{% include 'part.jinja' %}").unwrap();
+        fs::write(&include, "one").unwrap();
+        let mut host = external_host(&entry);
+        render_external(&mut host).unwrap();
+        let TemplateSource::Named { environment, .. } = &host.source else {
+            panic!("expected named template source")
+        };
+        let loaded = environment.templates().count();
+
+        host.reload_if_changed().unwrap();
+
+        assert_eq!(loaded, 2);
+        let TemplateSource::Named { environment, .. } = &host.source else {
+            panic!("expected named template source")
+        };
+        assert_eq!(environment.templates().count(), loaded);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn inline_and_embedded_templates_do_not_request_reload() {
+        let inline = TemplateHost::new(
+            Renderer::new(ActionRegistry::<TestAction>::new()),
+            TemplateSource::Inline("inline".to_string()),
+            TemplateEnvironment::from_values(BTreeMap::new()),
+        );
+        let mut environment = Environment::new();
+        environment.add_template("main.jinja", "embedded").unwrap();
+        let embedded = TemplateHost::new(
+            Renderer::new(ActionRegistry::<TestAction>::new()),
+            TemplateSource::Named {
+                environment: Box::new(environment),
+                entry: "main.jinja".to_string(),
+            },
+            TemplateEnvironment::from_values(BTreeMap::new()),
+        );
+
+        assert_eq!(inline.refresh_after(), None);
+        assert_eq!(embedded.refresh_after(), None);
+    }
 
     #[test]
     fn conflicting_template_settings_are_rejected() {
