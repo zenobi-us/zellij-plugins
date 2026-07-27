@@ -42,7 +42,7 @@ where
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(Error::new(
                 ErrorKind::InvalidOperation,
-                format!("could not read template {}", path.display()),
+                format!("could not read template {}: {error}", path.display()),
             )
             .with_source(error)),
         }
