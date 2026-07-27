@@ -79,7 +79,7 @@ The plugin needs:
 - `ReadApplicationState` for session and tab data
 - `ChangeApplicationState` for tab, pane positioning, focus, and reload actions
 - `OpenTerminalsOrPlugins` for opening plugin panes
-- `FullHdAccess` when `template_file` loads templates from the host filesystem
+- `FullHdAccess` when `template_file` remounts `/host` to the template directory before loading templates
 
 On first load, focus the one-row tabbar so its interactive Zellij permission prompt can consume `y` or `n`. Zellij renders a compact prompt when the pane is too short for the full permission list. After the answer, the plugin becomes non-selectable and keeps its configured one-row height.
 
@@ -90,6 +90,7 @@ To pre-grant permissions instead, open `${XDG_CACHE_HOME:-$HOME/.cache}/zellij/p
     ReadApplicationState
     ChangeApplicationState
     OpenTerminalsOrPlugins
+    FullHdAccess
 }
 ```
 
@@ -157,7 +158,7 @@ plugin location="file:/home/you/.config/zellij/plugins/zellij-tabbar.wasm" {
 }
 ```
 
-Relative paths use `${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}`. Absolute paths and `~` are supported. Includes, imports, and inheritance resolve relative to the including file and load lazily. The plugin checks loaded external template files before rendering and schedules a render roughly once per second, then reloads the complete template cache when any content changes. External templates are trusted: they can read any host file available to the plugin. `template` and `template_file` cannot be used together.
+Relative paths use `${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}`. Absolute paths and `~` are supported. For external templates, the plugin waits for `FullHdAccess`, remounts Zellij's `/host` filesystem to the template directory, then creates the renderer. Mounting the directory lets Zellij resolve host-side symlinks before WASI applies its capability boundary. Includes, imports, and inheritance resolve relative to the including file and load lazily. The plugin checks loaded external template files before rendering and schedules a render roughly once per second, then reloads the complete template cache when any content changes. External templates can read files inside the mounted template directory. `template` and `template_file` cannot be used together.
 
 Invalid configuration, unreadable files, and template failures render a visible `template error:` message instead of silently using the default. File checks continue while an error is visible, so fixing or restoring the template reloads it without restarting the plugin.
 
