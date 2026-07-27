@@ -200,7 +200,10 @@ where
         TemplateTarget::Name(name) => env.get_template(name)?.render(data)?,
     };
     let root = Node::Flex {
-        spec: FlexSpec::default(),
+        spec: FlexSpec {
+            align: Align::Stretch,
+            ..FlexSpec::default()
+        },
         children: parse_nodes(&rendered, &arena)?,
     };
     let refresh_after = *refresh_after

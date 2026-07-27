@@ -259,6 +259,49 @@ mod tests {
     }
 
     #[test]
+    fn flex_row_grow_consumes_remaining_columns() {
+        let renderer = Renderer::new(ActionRegistry::<TestAction>::new());
+        let frame = renderer
+            .render(
+                r#"{% call Flex(direction="row", grow=1) %}{% call Flex(shrink=0) %}left{% endcall %}{% call Flex(grow=1, justify="end") %}right{% endcall %}{% endcall %}"#,
+                context! {},
+                Viewport { rows: 1, cols: 10 },
+                |button| {
+                    Ok(ButtonPresentation {
+                        label: button.label.to_string(),
+                        focused: button.focused.unwrap_or(false),
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(frame.lines, ["left right"]);
+    }
+
+    #[test]
+    fn flex_column_grow_uses_viewport_rows() {
+        let renderer = Renderer::new(ActionRegistry::<TestAction>::new());
+        let render = |rows| {
+            renderer
+                .render(
+                    r#"{% call Flex(direction="column", grow=1) %}{% call Flex(shrink=0) %}top{% endcall %}{% call Flex(direction="column", grow=1, justify="end") %}bottom{% endcall %}{% endcall %}"#,
+                    context! {},
+                    Viewport { rows, cols: 6 },
+                    |button| {
+                        Ok(ButtonPresentation {
+                            label: button.label.to_string(),
+                            focused: button.focused.unwrap_or(false),
+                        })
+                    },
+                )
+                .unwrap()
+                .lines
+        };
+
+        assert_eq!(render(2), ["top", "bottom"]);
+        assert_eq!(render(5), ["top", "", "", "", "bottom"]);
+    }
+
+    #[test]
     fn flex_gap_inserts_cells_between_children() {
         let renderer = Renderer::new(ActionRegistry::<TestAction>::new());
         let frame = renderer

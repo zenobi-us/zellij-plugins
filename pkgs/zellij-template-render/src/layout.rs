@@ -624,27 +624,6 @@ mod tests {
     }
 
     #[test]
-    fn flex_grow_allocates_remaining_cells() {
-        let node: Node<TestAction> = Node::Flex {
-            spec: FlexSpec::default(),
-            children: vec![
-                Node::Text("a".into()),
-                Node::Flex {
-                    spec: FlexSpec {
-                        grow: 1,
-                        ..FlexSpec::default()
-                    },
-                    children: vec![Node::Text("b".into())],
-                },
-            ],
-        };
-        let canvas = layout(&node, 5, 1).unwrap();
-        assert_eq!(canvas.width(), 5);
-        assert_eq!(canvas.cells[0][0].text, "a");
-        assert_eq!(canvas.cells[0][1].text, "b");
-    }
-
-    #[test]
     fn scroll_keeps_focused_button_visible() {
         let node = Node::Flex {
             spec: FlexSpec {
