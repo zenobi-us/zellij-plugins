@@ -363,6 +363,74 @@ mod tests {
     }
 
     #[test]
+    fn animation_frame_drives_template_macros() {
+        let renderer = Renderer::new(ActionRegistry::<TestAction>::new());
+        let frame = renderer
+            .render(
+                r#"{% macro Spinner(frames, fps=10) -%}{{ frames[AnimationFrame(fps=fps) % (frames | length)] }}{%- endmacro %}{{ Spinner(["a", "b"]) }}"#,
+                context! {},
+                Viewport { rows: 1, cols: 1 },
+                |button| {
+                    Ok(ButtonPresentation {
+                        label: button.label.to_string(),
+                        focused: button.focused.unwrap_or(false),
+                    })
+                },
+            )
+            .unwrap();
+
+        assert!(matches!(
+            frame.lines.first().map(String::as_str),
+            Some("a" | "b")
+        ));
+        assert!(frame
+            .refresh_after
+            .is_some_and(|delay| !delay.is_zero() && delay <= Duration::from_millis(100)));
+    }
+
+    #[test]
+    fn unused_animation_macro_does_not_request_refresh() {
+        let renderer = Renderer::new(ActionRegistry::<TestAction>::new());
+        let frame = renderer
+            .render(
+                r#"{% macro Spinner() %}{{ AnimationFrame(fps=10) }}{% endmacro %}{% if loading %}{{ Spinner() }}{% endif %}"#,
+                context! { loading => false },
+                Viewport { rows: 1, cols: 1 },
+                |button| {
+                    Ok(ButtonPresentation {
+                        label: button.label.to_string(),
+                        focused: button.focused.unwrap_or(false),
+                    })
+                },
+            )
+            .unwrap();
+
+        assert_eq!(frame.refresh_after, None);
+    }
+
+    #[test]
+    fn fastest_animation_requirement_wins() {
+        let renderer = Renderer::new(ActionRegistry::<TestAction>::new());
+        let frame = renderer
+            .render(
+                r#"{{ AnimationFrame(fps=2) }} {{ AnimationFrame(fps=20) }}"#,
+                context! {},
+                Viewport { rows: 1, cols: 80 },
+                |button| {
+                    Ok(ButtonPresentation {
+                        label: button.label.to_string(),
+                        focused: button.focused.unwrap_or(false),
+                    })
+                },
+            )
+            .unwrap();
+
+        assert!(frame
+            .refresh_after
+            .is_some_and(|delay| !delay.is_zero() && delay <= Duration::from_millis(50)));
+    }
+
+    #[test]
     fn clock_uses_explicit_timezone_then_env_tz() {
         let renderer = Renderer::new(ActionRegistry::<TestAction>::new());
         let frame = renderer

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{Local, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
@@ -14,6 +14,8 @@ use super::{layout_error, ActionRegistry, ButtonPresentation, ButtonView};
 const MARKER: &str = "\u{e000}ZT:";
 const MARKER_END: char = '\u{e001}';
 const ACTION_PREFIX: &str = "\u{e002}ZT:";
+const MAX_ANIMATION_FPS: u32 = 20;
+const NANOS_PER_SECOND: u128 = 1_000_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Direction {
@@ -166,6 +168,13 @@ where
             clock_marker(state, kwargs, &clock_refresh)
         },
     );
+    let animation_now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| layout_error("system time is before the Unix epoch"))?;
+    let animation_refresh = Arc::clone(&refresh_after);
+    env.add_function("AnimationFrame", move |kwargs: Kwargs| {
+        animation_frame_marker(kwargs, animation_now, &animation_refresh)
+    });
 
     let action_values = actions
         .decoders
@@ -208,7 +217,7 @@ where
     };
     let refresh_after = *refresh_after
         .lock()
-        .map_err(|_| layout_error("clock refresh lock poisoned"))?;
+        .map_err(|_| layout_error("refresh request lock poisoned"))?;
     Ok((root, refresh_after))
 }
 
@@ -351,6 +360,53 @@ fn parse_choice(value: &str, valid: &[&str], name: &str) -> Result<String, Error
     }
 }
 
+fn request_refresh(
+    requested_refresh: &Mutex<Option<Duration>>,
+    refresh_after: Duration,
+) -> Result<(), Error> {
+    let mut requested = requested_refresh
+        .lock()
+        .map_err(|_| layout_error("refresh request lock poisoned"))?;
+    *requested = Some(requested.map_or(refresh_after, |current| current.min(refresh_after)));
+    Ok(())
+}
+
+fn animation_frame_at(now: Duration, fps: u32) -> Result<(u64, Duration), Error> {
+    if !(1..=MAX_ANIMATION_FPS).contains(&fps) {
+        return Err(Error::new(
+            ErrorKind::InvalidOperation,
+            format!("AnimationFrame fps must be between 1 and {MAX_ANIMATION_FPS}"),
+        ));
+    }
+
+    let now_ns = now.as_nanos();
+    let fps = u128::from(fps);
+    let frame = now_ns
+        .checked_mul(fps)
+        .ok_or_else(|| layout_error("animation frame overflow"))?
+        / NANOS_PER_SECOND;
+    let next_numerator = (frame + 1)
+        .checked_mul(NANOS_PER_SECOND)
+        .ok_or_else(|| layout_error("animation deadline overflow"))?;
+    let next_ns = next_numerator.div_ceil(fps);
+    let refresh_ns = u64::try_from(next_ns - now_ns)
+        .map_err(|_| layout_error("animation refresh delay overflow"))?;
+    let frame = u64::try_from(frame).map_err(|_| layout_error("animation frame overflow"))?;
+    Ok((frame, Duration::from_nanos(refresh_ns)))
+}
+
+fn animation_frame_marker(
+    kwargs: Kwargs,
+    now: Duration,
+    requested_refresh: &Mutex<Option<Duration>>,
+) -> Result<u64, Error> {
+    let fps = kwargs.get::<u32>("fps")?;
+    kwargs.assert_all_used()?;
+    let (frame, refresh_after) = animation_frame_at(now, fps)?;
+    request_refresh(requested_refresh, refresh_after)?;
+    Ok(frame)
+}
+
 fn clock_marker(
     state: &TemplateState<'_, '_>,
     kwargs: Kwargs,
@@ -380,10 +436,7 @@ fn clock_marker(
         u64::from(now.second()) * 1_000_000_000 + u64::from(now.nanosecond())
     };
     let refresh_after = Duration::from_nanos(period_ns - elapsed_ns);
-    let mut requested = requested_refresh
-        .lock()
-        .map_err(|_| layout_error("clock refresh lock poisoned"))?;
-    *requested = Some(requested.map_or(refresh_after, |current| current.min(refresh_after)));
+    request_refresh(requested_refresh, refresh_after)?;
 
     format_time_in_timezone(now.timestamp(), pattern, &timezone)
 }
@@ -662,6 +715,24 @@ mod tests {
             .unwrap()
             .contains("\u{1b}[38;2;1;2;3m"));
         assert!(background("x".into(), "red".into()).is_err());
+    }
+
+    #[test]
+    fn animation_frame_uses_wall_clock_boundaries() {
+        assert_eq!(
+            animation_frame_at(Duration::from_millis(250), 10).unwrap(),
+            (2, Duration::from_millis(50))
+        );
+        assert_eq!(
+            animation_frame_at(Duration::from_millis(300), 10).unwrap(),
+            (3, Duration::from_millis(100))
+        );
+    }
+
+    #[test]
+    fn animation_frame_rejects_unsafe_frequencies() {
+        assert!(animation_frame_at(Duration::ZERO, 0).is_err());
+        assert!(animation_frame_at(Duration::ZERO, MAX_ANIMATION_FPS + 1).is_err());
     }
 
     #[test]

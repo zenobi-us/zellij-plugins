@@ -9,6 +9,7 @@ The crate provides:
 - focus-following overflow
 - ANSI-aware measurement and clipping
 - `Clock(format=..., tz=...)` with IANA timezone support and host-scheduled refresh metadata; `tz` defaults to `env.TZ`, then UTC
+- `AnimationFrame(fps=...)` for template macros that require wall-clock animation frames
 - `bold`, `dim`, `fg`, `bg`, and time-format filters
 - `TemplateHost` ownership of template sources, external loading, environment allowlists, and shared `theme`, `env`, and `system` context derived from Zellij `ModeInfo`
 
@@ -83,6 +84,24 @@ Basic row with fixed edges and a flexible centre:
 ```
 
 Use `grow=1` on the region that should consume remaining width. Use `shrink=0` on controls that must remain visible. With `overflow="scroll"`, the viewport follows the descendant `Button` whose resolved focus state is true. There is no separate mouse-controlled scroll position.
+
+### AnimationFrame
+
+`AnimationFrame(fps=...)` returns a wall-clock frame number and asks the host to render again at the next frame boundary. Frequencies from `1` through `20` FPS are accepted. Multiple calls coalesce into one request using the earliest deadline.
+
+Use it inside ordinary template macros:
+
+```jinja
+{% macro Spinner(frames, fps=10) -%}
+  {{ frames[AnimationFrame(fps=fps) % (frames | length)] }}
+{%- endmacro %}
+
+{% if loading %}
+  {{ Spinner(["⠋", "⠙", "⠹", "⠸"], fps=10) }}
+{% endif %}
+```
+
+The macro only requests animation while its branch executes. Frames should have equal visible terminal width to avoid moving adjacent layout and hitboxes. Each requested frame reruns the complete template and layout; use the lowest frequency that looks correct.
 
 ## Colour contract
 
