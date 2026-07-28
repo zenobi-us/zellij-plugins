@@ -372,6 +372,28 @@ Friendly format tokens:
 | `MM` | Minute |
 | `SS` | Second |
 
+### Animation macros
+
+`AnimationFrame(fps=...)` returns a wall-clock frame number and schedules the next template render. Accepted frequencies are `1` through `20` FPS.
+
+```jinja
+{% macro Spinner(frames, fps=10) -%}
+  {{ frames[AnimationFrame(fps=fps) % (frames | length)] }}
+{%- endmacro %}
+
+{% if loading %}
+  {{ Spinner(["⠋", "⠙", "⠹", "⠸"], fps=10) }}
+{% endif %}
+```
+
+A macro registers its frequency only when executed. State can select the frequency directly:
+
+```jinja
+{{ Spinner(frames, fps=20 if urgent else 8) }}
+```
+
+Use equal-width frames. Every animation frame reruns the complete template and layout, so use the lowest acceptable frequency.
+
 ### Text filters
 
 Filters transform text before layout. They can be chained.

@@ -9,6 +9,67 @@ use std::time::Duration;
 use render::{ClickAction, RenderedFrame, TabBarRenderer};
 use zellij_tile::prelude::*;
 
+const TIMER_BOUNDARY_PADDING: Duration = Duration::from_millis(10);
+
+#[derive(Default)]
+struct RefreshTimer {
+    active: Option<Duration>,
+    superseded: Vec<Duration>,
+}
+
+impl RefreshTimer {
+    fn schedule(&mut self, requested: Option<Duration>) -> Option<Duration> {
+        let requested = requested? + TIMER_BOUNDARY_PADDING;
+        match self.active {
+            None => {
+                self.active = Some(requested);
+                Some(requested)
+            },
+            Some(active) if requested < active => {
+                self.superseded.push(active);
+                self.active = Some(requested);
+                Some(requested)
+            },
+            Some(_) => None,
+        }
+    }
+
+    fn expired(&mut self, elapsed_seconds: f64) -> bool {
+        let Ok(elapsed) = Duration::try_from_secs_f64(elapsed_seconds) else {
+            return false;
+        };
+        let Some(active) = self.active else {
+            if let Some((index, _)) = self
+                .superseded
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, duration)| duration.abs_diff(elapsed))
+            {
+                self.superseded.swap_remove(index);
+            }
+            return false;
+        };
+        let active_distance = active.abs_diff(elapsed);
+        let stale = self
+            .superseded
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, duration)| duration.abs_diff(elapsed));
+
+        // ponytail: Zellij timers have no IDs or cancellation. Match their elapsed duration;
+        // replace this with opaque timer IDs if Zellij adds them.
+        if let Some((index, _)) =
+            stale.filter(|(_, duration)| duration.abs_diff(elapsed) < active_distance)
+        {
+            self.superseded.swap_remove(index);
+            false
+        } else {
+            self.active = None;
+            true
+        }
+    }
+}
+
 /// Host-facing plugin state. Rendering details stay inside the `render` module.
 #[derive(Default)]
 struct State {
@@ -18,7 +79,7 @@ struct State {
     tabbar_renderer: Option<TabBarRenderer>,
     pending_template: Option<PendingTemplate>,
     template_error: Option<String>,
-    timer_armed: bool,
+    refresh_timer: RefreshTimer,
     open_plugins: BTreeMap<String, PaneId>,
 }
 
@@ -185,10 +246,7 @@ impl ZellijPlugin for State {
                 );
                 false
             },
-            Event::Timer(_) => {
-                self.timer_armed = false;
-                !self.tabs.is_empty()
-            },
+            Event::Timer(elapsed) => self.refresh_timer.expired(elapsed) && !self.tabs.is_empty(),
             Event::Mouse(Mouse::LeftClick(row, col)) => {
                 if let Some(action) = usize::try_from(row)
                     .ok()
@@ -252,13 +310,10 @@ impl ZellijPlugin for State {
                 )
             };
         }
-        if !self.timer_armed {
-            if let Some(delay) = self.frame.refresh_after {
-                // Cross the clock boundary before repainting. Exact-boundary timers can fire
-                // slightly early and leave the displayed minute unchanged.
-                set_timeout((delay + Duration::from_millis(10)).as_secs_f64());
-                self.timer_armed = true;
-            }
+        if let Some(delay) = self.refresh_timer.schedule(self.frame.refresh_after) {
+            // Cross clock and animation boundaries before repainting. Exact-boundary timers can
+            // fire slightly early and leave the displayed value unchanged.
+            set_timeout(delay.as_secs_f64());
         }
         let output = (0..rows)
             .map(|row| {
@@ -274,6 +329,41 @@ impl ZellijPlugin for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn faster_refresh_supersedes_armed_timer() {
+        let mut timer = RefreshTimer::default();
+
+        assert_eq!(
+            timer.schedule(Some(Duration::from_secs(60))),
+            Some(Duration::from_millis(60_010))
+        );
+        assert_eq!(
+            timer.schedule(Some(Duration::from_millis(100))),
+            Some(Duration::from_millis(110))
+        );
+        assert_eq!(timer.schedule(Some(Duration::from_millis(500))), None);
+        assert_eq!(timer.active, Some(Duration::from_millis(110)));
+    }
+
+    #[test]
+    fn superseded_timer_does_not_start_second_render_loop() {
+        let mut timer = RefreshTimer::default();
+        timer.schedule(Some(Duration::from_secs(60)));
+        timer.schedule(Some(Duration::from_millis(100)));
+
+        assert!(!timer.expired(60.01));
+        assert_eq!(timer.active, Some(Duration::from_millis(110)));
+        assert!(timer.expired(0.11));
+        assert_eq!(timer.active, None);
+    }
+
+    #[test]
+    fn equal_refresh_does_not_arm_duplicate_timer() {
+        let mut timer = RefreshTimer::default();
+        assert!(timer.schedule(Some(Duration::from_millis(100))).is_some());
+        assert_eq!(timer.schedule(Some(Duration::from_millis(100))), None);
+    }
 
     #[test]
     fn external_template_mounts_parent_and_uses_guest_root_entry() {
