@@ -2,7 +2,7 @@
 
 A focusable, template-driven tab bar plugin for [Zellij](https://zellij.dev/).
 
-Requires Zellij 0.45.x.
+Requires Zellij 0.44.1 or newer.
 
 It provides:
 
@@ -49,7 +49,7 @@ Build the local WASM and start a fresh Zellij session using [`demo.kdl`](demo.kd
 moon run zellij-tabbar:demo
 ```
 
-The task opens the session in a new Ghostty window. Before every launch it deletes the isolated demo permission cache at `target/demo-cache/zellij/permissions.kdl`, forcing Zellij to ask again without touching your normal cache. The tabbar remains selectable while the prompt is active; press `y` or `n`. Set `ZELLIJ_TABBAR_DEMO_SESSION` to choose the session name; otherwise the task generates a unique name.
+The task opens [`demo.kdl`](demo.kdl) in a new Ghostty window. It uses your normal Zellij configuration and permission cache. If the plugin permissions are not already cached, the tabbar remains selectable while the prompt is active; press `y` or `n`.
 
 ## Add it to Zellij
 
@@ -66,7 +66,7 @@ Use it in a layout:
 ```kdl
 layout {
     pane size=1 borderless=true focus=true {
-        tabbar
+        plugin location="tabbar"
     }
     pane
 }
@@ -83,7 +83,17 @@ The plugin needs:
 
 On first load, focus the one-row tabbar so its interactive Zellij permission prompt can consume `y` or `n`. Zellij renders a compact prompt when the pane is too short for the full permission list. After the answer, the plugin becomes non-selectable and keeps its configured one-row height.
 
-To pre-grant permissions instead, open `${XDG_CACHE_HOME:-$HOME/.cache}/zellij/permissions.kdl` and add a block keyed by the absolute plugin path:
+To pre-grant permissions instead, open `${XDG_CACHE_HOME:-$HOME/.cache}/zellij/permissions.kdl`. Default and inline-template configurations need:
+
+```kdl
+"/home/you/.config/zellij/plugins/zellij-tabbar.wasm" {
+    ReadApplicationState
+    ChangeApplicationState
+    OpenTerminalsOrPlugins
+}
+```
+
+A `template_file` configuration also needs `FullHdAccess`:
 
 ```kdl
 "/home/you/.config/zellij/plugins/zellij-tabbar.wasm" {
@@ -101,23 +111,23 @@ mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/zellij"
 touch "${XDG_CACHE_HOME:-$HOME/.cache}/zellij/permissions.kdl"
 ```
 
-The path must exactly match the plugin path Zellij resolves. Use this to obtain it:
+The cache key must match the expanded plugin path used by the `location` setting. For `file:~/.config/zellij/plugins/zellij-tabbar.wasm`, use:
 
 ```bash
-realpath ~/.config/zellij/plugins/zellij-tabbar.wasm
+printf '%s\n' "$HOME/.config/zellij/plugins/zellij-tabbar.wasm"
 ```
 
-Restart the Zellij session after changing the cache. Remove this block when you want Zellij to request permission again.
+Do not use `realpath`: resolving symlinks can produce a different path from the key Zellij stores. Restart the Zellij session after changing the cache. Remove the block when you want Zellij to request permission again.
 
 ## Default layout
 
 No configuration is required. The default template renders:
 
 ```text
-session name | scrollable tabs | +
+Agents | session name | scrollable tabs | + | local time | Adelaide time
 ```
 
-The active tab stays visible when tabs exceed available width. Click a tab to switch to it. Click `+` to create a tab.
+The active tab stays visible when tabs exceed available width. Click the session name to open or reload the session manager, click a tab to switch to it, and click `+` to create a tab. An overflow indicator appears when the tabs do not fit.
 
 ## Custom template
 
