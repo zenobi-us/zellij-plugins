@@ -2,11 +2,12 @@
 
 mod render;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use render::{ClickAction, RenderedFrame, TabBarRenderer};
+use render::{RenderedFrame, TabBarRenderer};
+use zellij_template_render::{builtin_action_permissions, BuiltinActionDispatcher};
 use zellij_tile::prelude::*;
 
 const TIMER_BOUNDARY_PADDING: Duration = Duration::from_millis(10);
@@ -80,7 +81,7 @@ struct State {
     pending_template: Option<PendingTemplate>,
     template_error: Option<String>,
     refresh_timer: RefreshTimer,
-    open_plugins: BTreeMap<String, PaneId>,
+    builtin_actions: BuiltinActionDispatcher,
 }
 
 register_plugin!(State);
@@ -151,6 +152,11 @@ impl ZellijPlugin for State {
             PermissionType::ChangeApplicationState,
             PermissionType::OpenTerminalsOrPlugins,
         ];
+        for permission in builtin_action_permissions() {
+            if !permissions.contains(permission) {
+                permissions.push(*permission);
+            }
+        }
         let has_template_file = configuration.contains_key("template_file");
         let has_conflicting_template = has_template_file && configuration.contains_key("template");
         if has_template_file && !has_conflicting_template {
@@ -234,16 +240,7 @@ impl ZellijPlugin for State {
                 true
             },
             Event::PaneUpdate(panes) => {
-                let plugin_ids = panes
-                    .panes
-                    .values()
-                    .flatten()
-                    .filter(|pane| pane.is_plugin)
-                    .map(|pane| pane.id)
-                    .collect::<BTreeSet<_>>();
-                self.open_plugins.retain(
-                    |_, pane_id| matches!(pane_id, PaneId::Plugin(id) if plugin_ids.contains(id)),
-                );
+                self.builtin_actions.retain_open_plugins(&panes);
                 false
             },
             Event::Timer(elapsed) => self.refresh_timer.expired(elapsed) && !self.tabs.is_empty(),
@@ -254,32 +251,7 @@ impl ZellijPlugin for State {
                     .and_then(|line| line.get(col))
                     .and_then(Clone::clone)
                 {
-                    match action {
-                        ClickAction::SwitchTab(index) => switch_tab_to(index as u32),
-                        ClickAction::NewTab => {
-                            new_tab::<&str>(None, None);
-                        },
-                        ClickAction::OpenOrReloadPlugin { url, coordinates } => {
-                            if let Some(PaneId::Plugin(plugin_id)) =
-                                self.open_plugins.get(&url).cloned()
-                            {
-                                float_multiple_panes(vec![PaneId::Plugin(plugin_id)]);
-                                change_floating_panes_coordinates(vec![(
-                                    PaneId::Plugin(plugin_id),
-                                    coordinates,
-                                )]);
-                                focus_plugin_pane(plugin_id, true, false);
-                                reload_plugin_with_id(plugin_id);
-                            } else if let Some(pane_id) = open_plugin_pane_floating(
-                                &url,
-                                BTreeMap::new(),
-                                Some(coordinates),
-                                BTreeMap::new(),
-                            ) {
-                                self.open_plugins.insert(url, pane_id);
-                            }
-                        },
-                    }
+                    self.builtin_actions.dispatch(action);
                 }
                 false
             },

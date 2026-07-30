@@ -1,29 +1,18 @@
 //! Tabbar-specific template data, actions, and button styling.
 
 use ansi_term::ANSIStrings;
-use minijinja::value::{from_args, Kwargs};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use zellij_template_render::{
-    error_frame as render_error_frame, ActionRegistry, ButtonPresentation, ButtonView, Environment,
-    Error, ErrorKind, Frame, Renderer, TemplateContext, TemplateHost, Value, Viewport,
+    error_frame as render_error_frame, ActionRegistry, BuiltinAction as ClickAction,
+    ButtonPresentation, ButtonView, Environment, Error, ErrorKind, Frame, Renderer,
+    TemplateContext, TemplateHost, Value, Viewport,
 };
 use zellij_tile::prelude::*;
 use zellij_tile_utils::style;
 
 /// Built-in template used when plugin configuration provides no override.
 const DEFAULT_TEMPLATE_NAME: &str = "main.jinja";
-
-/// Typed operation attached to cells rendered by `Button`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ClickAction {
-    SwitchTab(usize),
-    NewTab,
-    OpenOrReloadPlugin {
-        url: String,
-        coordinates: FloatingPaneCoordinates,
-    },
-}
 
 pub(crate) type RenderedFrame = Frame<ClickAction>;
 
@@ -53,29 +42,7 @@ impl TabBarRenderer {
         minijinja_embed::load_templates!(&mut embedded);
         Ok(Self {
             host: TemplateHost::from_configuration(
-                Renderer::new(
-                    ActionRegistry::new()
-                        .with("switch_tab", |args| {
-                            let index =
-                                args.first().and_then(Value::as_usize).ok_or_else(|| {
-                                    Error::new(
-                                        ErrorKind::InvalidOperation,
-                                        "switch_tab expects an integer index",
-                                    )
-                                })?;
-                            Ok(ClickAction::SwitchTab(index))
-                        })
-                        .with("new_tab", |args| {
-                            if !args.is_empty() {
-                                return Err(Error::new(
-                                    ErrorKind::InvalidOperation,
-                                    "new_tab expects no arguments",
-                                ));
-                            }
-                            Ok(ClickAction::NewTab)
-                        })
-                        .with("open_or_reload_plugin", decode_open_or_reload_plugin),
-                ),
+                Renderer::new(ActionRegistry::new().with_builtins()),
                 configuration,
                 embedded,
                 DEFAULT_TEMPLATE_NAME,
@@ -128,10 +95,11 @@ fn present_button(
     capabilities: PluginCapabilities,
 ) -> Result<ButtonPresentation, Error> {
     let focused = button.focused.unwrap_or_else(|| match button.action {
-        ClickAction::SwitchTab(index) => tabs
+        ClickAction::FocusTab(index) => tabs
             .iter()
             .any(|tab| tab.active && tab.position + 1 == *index),
-        ClickAction::NewTab | ClickAction::OpenOrReloadPlugin { .. } => false,
+        ClickAction::NewTab | ClickAction::RunPlugin { .. } => false,
+        _ => false,
     });
     Ok(ButtonPresentation {
         label: style_button(
@@ -156,7 +124,7 @@ fn style_button(
 ) -> Result<String, Error> {
     let separator = if capabilities.arrow_fonts { "" } else { "" };
     let label = match action {
-        ClickAction::SwitchTab(index) => {
+        ClickAction::FocusTab(index) => {
             let tab = find_tab(tabs, *index)?;
             let mut label = label.to_string();
             if tab.is_fullscreen_active {
@@ -169,13 +137,14 @@ fn style_button(
             }
             label
         },
-        ClickAction::NewTab | ClickAction::OpenOrReloadPlugin { .. } => label.to_string(),
+        _ => label.to_string(),
     };
     let alternate = match action {
-        ClickAction::SwitchTab(index) => index % 2 == 0 && capabilities.arrow_fonts,
-        ClickAction::NewTab | ClickAction::OpenOrReloadPlugin { .. } => {
+        ClickAction::FocusTab(index) => index % 2 == 0 && capabilities.arrow_fonts,
+        ClickAction::NewTab | ClickAction::RunPlugin { .. } => {
             tabs.len() % 2 == 1 && capabilities.arrow_fonts
         },
+        _ => false,
     };
     let background = if focused {
         palette.ribbon_selected.background
@@ -185,7 +154,7 @@ fn style_button(
         palette.ribbon_unselected.background
     };
     let foreground = match action {
-        ClickAction::SwitchTab(index) => {
+        ClickAction::FocusTab(index) => {
             let tab = find_tab(tabs, *index)?;
             if tab.is_flashing_bell || tab.has_bell_notification {
                 if focused {
@@ -199,9 +168,7 @@ fn style_button(
                 palette.ribbon_unselected.base
             }
         },
-        ClickAction::NewTab | ClickAction::OpenOrReloadPlugin { .. } => {
-            palette.ribbon_unselected.base
-        },
+        _ => palette.ribbon_unselected.base,
     };
     let fill = palette.text_unselected.background;
     let left = style!(fill, background).paint(separator);
@@ -212,82 +179,13 @@ fn style_button(
     Ok(ANSIStrings(&[left, text, right]).to_string())
 }
 
-fn decode_open_or_reload_plugin(args: &[Value]) -> Result<ClickAction, Error> {
-    let (positional, kwargs) = from_args::<(&[Value], Kwargs)>(args)?;
-    if positional.len() != 1 {
-        return Err(Error::new(
-            ErrorKind::InvalidOperation,
-            "open_or_reload_plugin expects one plugin URL",
-        ));
-    }
-    let url = positional[0]
-        .as_str()
-        .filter(|url| !url.is_empty())
-        .ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidOperation,
-                "open_or_reload_plugin expects a non-empty plugin URL",
-            )
-        })?
-        .to_string();
-    let x = coordinate_argument(&kwargs, "x", None, true)?;
-    let y = coordinate_argument(&kwargs, "y", None, true)?;
-    let width = coordinate_argument(&kwargs, "w", Some("50%"), false)?;
-    let height = coordinate_argument(&kwargs, "h", Some("50%"), false)?;
-    kwargs.assert_all_used()?;
-    let coordinates = FloatingPaneCoordinates::new(x, y, width, height, None, None)
-        .ok_or_else(|| Error::new(ErrorKind::InvalidOperation, "invalid floating pane size"))?;
-    Ok(ClickAction::OpenOrReloadPlugin { url, coordinates })
-}
-
-fn coordinate_argument(
-    kwargs: &Kwargs,
-    name: &str,
-    default: Option<&str>,
-    allow_zero: bool,
-) -> Result<Option<String>, Error> {
-    let value = kwargs.get::<Option<Value>>(name)?;
-    let value = match value {
-        Some(value) if value.as_str().is_some() => value.as_str().unwrap().to_string(),
-        Some(value) if value.as_i64().is_some_and(|value| value >= 0) => {
-            value.as_i64().unwrap().to_string()
-        },
-        Some(_) => return Err(invalid_coordinate(name)),
-        None => return Ok(default.map(str::to_string)),
-    };
-    let number = if let Some(percent) = value.strip_suffix('%') {
-        let percent = percent
-            .parse::<usize>()
-            .map_err(|_| invalid_coordinate(name))?;
-        if percent > 100 {
-            return Err(invalid_coordinate(name));
-        }
-        percent
-    } else {
-        value
-            .parse::<usize>()
-            .map_err(|_| invalid_coordinate(name))?
-    };
-    if !allow_zero && number == 0 {
-        return Err(invalid_coordinate(name));
-    }
-    Ok(Some(value))
-}
-
-fn invalid_coordinate(name: &str) -> Error {
-    Error::new(
-        ErrorKind::InvalidOperation,
-        format!("{name} expects a non-negative cell count or percentage"),
-    )
-}
-
 fn find_tab(tabs: &[TabInfo], index: usize) -> Result<&TabInfo, Error> {
     tabs.iter()
         .find(|tab| tab.position + 1 == index)
         .ok_or_else(|| {
             Error::new(
                 ErrorKind::InvalidOperation,
-                "switch_tab index does not exist",
+                "focus_tab index does not exist",
             )
         })
 }
@@ -361,7 +259,7 @@ mod tests {
         assert!(plain_text(&frame.lines[0]).contains("one"));
         assert!(frame.hitboxes[0]
             .iter()
-            .any(|action| action == &Some(ClickAction::SwitchTab(1))));
+            .any(|action| action == &Some(ClickAction::FocusTab(1))));
         assert!(frame.hitboxes[0]
             .iter()
             .any(|action| action == &Some(ClickAction::NewTab)));
@@ -429,7 +327,7 @@ mod tests {
         let frame = renderer.render(&mode, &[tab], 1, 3).unwrap();
         assert!(frame.hitboxes[0]
             .iter()
-            .any(|action| action == &Some(ClickAction::SwitchTab(1))));
+            .any(|action| action == &Some(ClickAction::FocusTab(1))));
     }
 
     #[test]
@@ -448,7 +346,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             action,
-            ClickAction::OpenOrReloadPlugin {
+            ClickAction::RunPlugin {
                 url: "session-manager".to_string(),
                 coordinates: expected,
             }
@@ -471,7 +369,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             action,
-            ClickAction::OpenOrReloadPlugin {
+            ClickAction::RunPlugin {
                 url: "session-manager".to_string(),
                 coordinates: expected,
             }

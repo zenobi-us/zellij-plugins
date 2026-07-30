@@ -3,58 +3,21 @@
 //! Hosts provide template data, typed actions, and button presentation policy.
 //! The renderer owns template helpers, layout, clipping, and click hitboxes.
 
+mod action;
 mod file_template;
 mod host;
 mod layout;
 mod template;
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::Duration;
 
+pub use action::{
+    builtin_action_permissions, ActionRegistry, BuiltinAction, BuiltinActionDispatcher,
+};
 pub use file_template::environment as file_template_environment;
 pub use host::{TemplateContext, TemplateEnvironment, TemplateHost, TemplateSource, TemplateTheme};
 pub use minijinja::{context, Environment, Error, ErrorKind, Value};
 use unicode_width::UnicodeWidthChar;
-
-/// Typed decoder for one function exposed under the template `actions` object.
-type ActionDecoder<A> = Arc<dyn Fn(&[Value]) -> Result<A, Error> + Send + Sync>;
-
-/// Template action functions and their host-side typed decoders.
-pub struct ActionRegistry<A> {
-    decoders: BTreeMap<String, ActionDecoder<A>>,
-}
-
-impl<A> Default for ActionRegistry<A> {
-    fn default() -> Self {
-        Self {
-            decoders: BTreeMap::new(),
-        }
-    }
-}
-
-impl<A> ActionRegistry<A> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn register(
-        &mut self,
-        name: impl Into<String>,
-        decode: impl Fn(&[Value]) -> Result<A, Error> + Send + Sync + 'static,
-    ) {
-        self.decoders.insert(name.into(), Arc::new(decode));
-    }
-
-    pub fn with(
-        mut self,
-        name: impl Into<String>,
-        decode: impl Fn(&[Value]) -> Result<A, Error> + Send + Sync + 'static,
-    ) -> Self {
-        self.register(name, decode);
-        self
-    }
-}
 
 /// Terminal viewport dimensions in cells.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -221,9 +184,10 @@ fn layout_error(message: impl Into<String>) -> Error {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::io;
     use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
@@ -256,6 +220,30 @@ mod tests {
             .unwrap();
         assert_eq!(frame.lines, ["go"]);
         assert_eq!(frame.hitboxes[0][0], Some(TestAction::Open(7)));
+    }
+
+    #[test]
+    fn builtin_actions_can_be_replaced_after_install() {
+        let renderer = Renderer::new(
+            ActionRegistry::new()
+                .with_builtins()
+                .with("focus_tab", |_| Ok(BuiltinAction::NewTab)),
+        );
+        let frame = renderer
+            .render(
+                r#"{% call Button(on_click=actions.focus_tab(7)) %}x{% endcall %}"#,
+                context! {},
+                Viewport { rows: 1, cols: 1 },
+                |button| {
+                    Ok(ButtonPresentation {
+                        label: button.label.to_string(),
+                        focused: button.focused.unwrap_or(false),
+                    })
+                },
+            )
+            .unwrap();
+
+        assert_eq!(frame.hitboxes[0][0], Some(BuiltinAction::NewTab));
     }
 
     #[test]
