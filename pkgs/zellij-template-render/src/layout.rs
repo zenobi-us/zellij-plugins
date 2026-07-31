@@ -503,9 +503,10 @@ fn text_canvas<A: Clone>(
     validate_text(text)?;
     let mut canvas = Canvas::new(width, height);
     for (y, line) in text.split('\n').take(height).enumerate() {
+        let row = &mut canvas.cells[y];
         if line.bytes().all(|byte| (0x20..0x7f).contains(&byte)) {
             for (x, byte) in line.bytes().take(width).enumerate() {
-                canvas.cells[y][x] = Cell {
+                row[x] = Cell {
                     text: char::from(byte).to_string(),
                     action: action.clone(),
                 };
@@ -544,17 +545,17 @@ fn text_canvas<A: Clone>(
             if !active_sgr.is_empty() {
                 pending.push_str("\u{1b}[0m");
             }
-            canvas.cells[y][x] = Cell {
+            row[x] = Cell {
                 text: std::mem::take(&mut pending),
                 action: action.clone(),
             };
             for continuation in 1..cell_width {
-                canvas.cells[y][x + continuation].action = action.clone();
+                row[x + continuation].action = action.clone();
             }
             x += cell_width;
         }
         if !pending.is_empty() && x > 0 {
-            canvas.cells[y][x - 1].text.push_str(&pending);
+            row[x - 1].text.push_str(&pending);
         }
     }
     Ok(canvas)
