@@ -1,0 +1,1 @@
+{"type":"config","name":"Optimize zellij-template-render 100-button render path","metricName":"render_p95_us","metricUnit":"µs","bestDirection":"lower"}
