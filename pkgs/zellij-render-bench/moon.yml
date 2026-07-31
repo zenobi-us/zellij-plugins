@@ -1,0 +1,80 @@
+---
+$schema: "file://../../.moon/cache/schemas/project.json"
+
+language: rust
+layer: library
+tags:
+  - builds-wasm
+
+tasks:
+  build:
+    script: |
+      set -euo pipefail
+      rustup target add wasm32-wasip1 >/dev/null 2>&1 || true
+      CARGO_TARGET_DIR="$PWD/target" cargo build --release --target wasm32-wasip1
+    inputs:
+      - "Cargo.toml"
+      - "src/**/*.rs"
+    outputs:
+      - "target/wasm32-wasip1/release/zellij-render-bench.wasm"
+
+  check:
+    script: |
+      set -euo pipefail
+      rustup target add wasm32-wasip1 >/dev/null 2>&1 || true
+      CARGO_TARGET_DIR="$PWD/target" cargo check --target wasm32-wasip1
+    inputs:
+      - "Cargo.toml"
+      - "src/**/*.rs"
+
+  test:
+    script: |
+      set -euo pipefail
+      host_target="$(rustc -vV | awk '/^host:/ {print $2}')"
+      CARGO_TARGET_DIR="$PWD/target" cargo test --target "$host_target"
+    inputs:
+      - "Cargo.toml"
+      - "src/**/*.rs"
+
+  demo:
+    type: run
+    deps:
+      - "~:build"
+    script: |
+      set -euo pipefail
+      layout="${LAYOUT:-demo/one-plugin-grid.kdl}"
+      zellij --new-session-with-layout "$PWD/$layout"
+    inputs:
+      - "demo/**/*.kdl"
+      - "target/wasm32-wasip1/release/zellij-render-bench.wasm"
+    options:
+      cache: false
+      interactive: true
+      runInCI: false
+
+  bench-micro:
+    type: run
+    script: scripts/bench.sh micro
+    inputs:
+      - "scripts/bench.sh"
+    options:
+      cache: false
+
+  bench-measure:
+    type: run
+    script: scripts/bench.sh measure
+    inputs:
+      - "scripts/bench.sh"
+    options:
+      cache: false
+      interactive: true
+      runInCI: false
+
+  autoresearch-measure:
+    type: run
+    script: scripts/measure.sh
+    inputs:
+      - "scripts/bench.sh"
+      - "scripts/measure.sh"
+    options:
+      cache: false

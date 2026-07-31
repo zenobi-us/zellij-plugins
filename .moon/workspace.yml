@@ -4,6 +4,7 @@ projects:
     deployment: "pkgs/tools/deployment"
     github: ".github"
     repo: "."
+    zellij-render-bench: "pkgs/zellij-render-bench"
     zellij-tabbar: "pkgs/zellij-tabbar"
     zellij-template-render: "pkgs/zellij-template-render"
 

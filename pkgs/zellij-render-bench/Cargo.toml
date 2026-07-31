@@ -1,0 +1,15 @@
+[package]
+name = "zellij-render-bench"
+version = "0.1.0"
+edition = "2021"
+description = "Zellij plugin for measuring zellij-template-render impact"
+license = "MIT"
+
+[dependencies]
+minijinja = "2.21"
+serde = { version = "1", features = ["derive"] }
+zellij-template-render = { path = "../zellij-template-render" }
+zellij-tile = "0.44.3"
+
+[lints.clippy]
+too_many_arguments = "allow"

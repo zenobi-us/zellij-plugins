@@ -2581,6 +2581,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zellij-render-bench"
+version = "0.1.0"
+dependencies = [
+ "minijinja",
+ "serde",
+ "zellij-template-render",
+ "zellij-tile",
+]
+
+[[package]]
 name = "zellij-tabbar"
 version = "0.1.0"
 dependencies = [
@@ -2601,6 +2611,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "minijinja",
+ "serde",
  "unicode-width",
  "zellij-tile",
 ]

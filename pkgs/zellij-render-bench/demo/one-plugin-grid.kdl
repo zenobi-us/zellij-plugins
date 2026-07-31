@@ -1,0 +1,25 @@
+layout {
+    tab name="render-bench" split_direction="vertical" {
+        pane split_direction="horizontal" {
+            pane {
+                plugin location="file:target/wasm32-wasip1/release/zellij-render-bench.wasm" {
+                    animated "true"
+                    fps "20"
+                }
+            }
+            pane command="sleep" { args "infinity" }
+            pane command="sleep" { args "infinity" }
+            pane command="sleep" { args "infinity" }
+            pane command="sleep" { args "infinity" }
+        }
+        pane split_direction="horizontal" {
+            pane command="sleep" { args "infinity" }
+            pane command="sleep" { args "infinity" }
+            pane command="sleep" { args "infinity" }
+            pane command="sleep" { args "infinity" }
+            pane command="sleep" { args "infinity" }
+        }
+    }
+}
+
+session_serialization false

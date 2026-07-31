@@ -13,5 +13,8 @@ minijinja = "2.21"
 unicode-width = "0.1.8"
 zellij-tile = "0.44.3"
 
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+
 [lints.clippy]
 too_many_arguments = "allow"

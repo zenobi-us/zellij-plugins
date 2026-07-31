@@ -6,6 +6,7 @@ Plugins and shared libraries for [Zellij](https://zellij.dev/).
 
 | Package | Description |
 |---|---|
+| [`zellij-render-bench`](pkgs/zellij-render-bench) | Demo plugin for measuring renderer cost in Zellij |
 | [`zellij-tabbar`](pkgs/zellij-tabbar) | Focusable, template-driven tab bar plugin |
 | [`zellij-template-render`](pkgs/zellij-template-render) | Reusable template, terminal layout, and typed hitbox renderer |
 
@@ -28,6 +29,14 @@ Run a task for one package:
 moon run zellij-tabbar:build
 ```
 
+Measure renderer impact:
+
+```bash
+moon run zellij-render-bench:bench-micro
+moon run zellij-render-bench:demo
+moon run zellij-render-bench:bench-measure
+```
+
 Install locally:
 
 ```bash
@@ -38,6 +47,7 @@ moon run repo:install
 
 ```text
 pkgs/
+├── zellij-render-bench/
 ├── zellij-tabbar/
 └── zellij-template-render/
 ```
