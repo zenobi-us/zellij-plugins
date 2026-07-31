@@ -20,7 +20,7 @@ struct Cell<A> {
 impl<A> Default for Cell<A> {
     fn default() -> Self {
         Self {
-            text: " ".into(),
+            text: String::new(),
             action: None,
         }
     }
@@ -90,7 +90,11 @@ impl<A: Clone> Canvas<A> {
             let mut line = String::new();
             let mut actions = Vec::with_capacity(row.len());
             for cell in row {
-                line.push_str(&cell.text);
+                if cell.text.is_empty() {
+                    line.push(' ');
+                } else {
+                    line.push_str(&cell.text);
+                }
                 actions.push(cell.action);
             }
             lines.push(line.trim_end_matches(' ').to_string());
