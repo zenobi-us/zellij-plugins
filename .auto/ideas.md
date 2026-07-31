@@ -1,0 +1,2 @@
+- Revisit direct leaf painting only if it can avoid per-child validation branches, for example by carrying a precomputed plain-ASCII flag on text/button nodes during parse.
+- Revisit `CellText` or another compact cell representation only as part of a broader output-path redesign; it improved median cost but regressed p95 as a standalone enum swap.

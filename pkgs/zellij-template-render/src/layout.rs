@@ -501,9 +501,9 @@ fn text_canvas<A: Clone>(
     height: usize,
     action: Option<A>,
 ) -> Result<Canvas<A>, Error> {
-    let lines = split_text_lines(text)?;
+    validate_text(text)?;
     let mut canvas = Canvas::new(width, height);
-    for (y, line) in lines.iter().take(height).enumerate() {
+    for (y, line) in text.split('\n').take(height).enumerate() {
         if line.bytes().all(|byte| (0x20..0x7f).contains(&byte)) {
             for (x, byte) in line.bytes().take(width).enumerate() {
                 canvas.cells[y][x] = Cell {
@@ -562,12 +562,17 @@ fn text_canvas<A: Clone>(
 }
 
 fn split_text_lines(text: &str) -> Result<Vec<&str>, Error> {
+    validate_text(text)?;
+    Ok(text.split('\n').collect())
+}
+
+fn validate_text(text: &str) -> Result<(), Error> {
     if text.contains('\r') || text.contains('\t') {
         return Err(layout_error(
             "template text cannot contain tabs or carriage returns",
         ));
     }
-    Ok(text.split('\n').collect())
+    Ok(())
 }
 
 fn visible_width(text: &str) -> usize {
