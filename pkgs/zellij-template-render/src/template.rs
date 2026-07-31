@@ -1,6 +1,7 @@
 //! Evaluates MiniJinja templates into the renderer's internal layout tree.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -279,12 +280,16 @@ where
         action: &action,
         focused,
     })?;
-    Ok(format!(
-        "{MARKER}B|{action_id}|{}{}{label}{MARKER}/B{MARKER_END}",
-        usize::from(presentation.focused),
-        MARKER_END,
-        label = presentation.label,
-    ))
+    let mut marker = String::with_capacity(MARKER.len() * 2 + presentation.label.len() + 32);
+    marker.push_str(MARKER);
+    marker.push_str("B|");
+    let _ = write!(marker, "{action_id}|{}", usize::from(presentation.focused));
+    marker.push(MARKER_END);
+    marker.push_str(&presentation.label);
+    marker.push_str(MARKER);
+    marker.push_str("/B");
+    marker.push(MARKER_END);
+    Ok(marker)
 }
 
 fn flex_marker(state: &TemplateState<'_, '_>, kwargs: Kwargs) -> Result<String, Error> {
