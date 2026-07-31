@@ -49,12 +49,31 @@ impl<A: Clone> Canvas<A> {
         clip_width: usize,
         clip_height: usize,
     ) {
-        for (child_y, row) in child.cells.iter().enumerate().take(clip_height) {
+        self.blit_from(child, x, y, 0, 0, clip_width, clip_height);
+    }
+
+    fn blit_from(
+        &mut self,
+        child: &Canvas<A>,
+        x: usize,
+        y: usize,
+        source_x: usize,
+        source_y: usize,
+        clip_width: usize,
+        clip_height: usize,
+    ) {
+        for child_y in 0..clip_height {
             let Some(target_row) = self.cells.get_mut(y + child_y) else {
                 break;
             };
-            for (child_x, cell) in row.iter().enumerate().take(clip_width) {
+            let Some(source_row) = child.cells.get(source_y + child_y) else {
+                break;
+            };
+            for child_x in 0..clip_width {
                 let Some(target) = target_row.get_mut(x + child_x) else {
+                    break;
+                };
+                let Some(cell) = source_row.get(source_x + child_x) else {
                     break;
                 };
                 if !cell.text.is_empty() || cell.action.is_some() {
@@ -370,36 +389,26 @@ fn layout_flex_children<A: Clone>(
         if cursor.saturating_add(main) > offset && visible_cursor < main_available {
             let skip = offset.saturating_sub(cursor);
             if spec.direction == Direction::Row {
-                let clipped = crop(
+                canvas.blit_from(
                     &child_canvas,
+                    visible_cursor,
+                    cross,
                     skip,
                     0,
                     main.saturating_sub(skip)
                         .min(main_available - visible_cursor),
                     child_height,
                 );
-                canvas.blit(
-                    &clipped,
-                    visible_cursor,
-                    cross,
-                    clipped.width(),
-                    clipped.height(),
-                );
             } else {
-                let clipped = crop(
+                canvas.blit_from(
                     &child_canvas,
+                    cross,
+                    visible_cursor,
                     0,
                     skip,
                     child_width,
                     main.saturating_sub(skip)
                         .min(main_available - visible_cursor),
-                );
-                canvas.blit(
-                    &clipped,
-                    cross,
-                    visible_cursor,
-                    clipped.width(),
-                    clipped.height(),
                 );
             }
         }
@@ -480,24 +489,6 @@ fn justify(justify: Justify, free: usize, count: usize) -> (usize, usize) {
         },
         _ => (0, 0),
     }
-}
-
-fn crop<A: Clone>(
-    canvas: &Canvas<A>,
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-) -> Canvas<A> {
-    let mut result = Canvas::new(width, height);
-    for row in 0..height {
-        for col in 0..width {
-            if let Some(cell) = canvas.cells.get(y + row).and_then(|r| r.get(x + col)) {
-                result.cells[row][col] = cell.clone();
-            }
-        }
-    }
-    result
 }
 
 fn text_canvas<A: Clone>(
@@ -706,7 +697,9 @@ mod tests {
     #[test]
     fn clipped_ansi_text_keeps_each_visible_cell_styled() {
         let canvas: Canvas<TestAction> = text_canvas("\u{1b}[31mabc\u{1b}[0m", 3, 1, None).unwrap();
-        let clipped = crop(&canvas, 1, 0, 1, 1).into_frame();
+        let mut clipped = Canvas::new(1, 1);
+        clipped.blit_from(&canvas, 0, 0, 1, 0, 1, 1);
+        let clipped = clipped.into_frame();
         assert!(clipped.lines[0].starts_with("\u{1b}[31m"));
         assert!(clipped.lines[0].ends_with("\u{1b}[0m"));
         assert!(clipped.lines[0].contains('b'));
