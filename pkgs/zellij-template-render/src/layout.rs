@@ -127,15 +127,14 @@ pub(super) fn layout<A: Clone>(
 fn natural_size<A>(node: &Node<A>) -> Result<(usize, usize), Error> {
     match node {
         Node::Text(text) | Node::Button { label: text, .. } => {
-            let lines = split_text_lines(text)?;
-            Ok((
-                lines
-                    .iter()
-                    .map(|line| visible_width(line))
-                    .max()
-                    .unwrap_or(0),
-                lines.len().max(1),
-            ))
+            validate_text(text)?;
+            let mut width = 0usize;
+            let mut height = 0usize;
+            for line in text.split('\n') {
+                width = width.max(visible_width(line));
+                height += 1;
+            }
+            Ok((width, height.max(1)))
         },
         Node::Flex { spec, children } => {
             let sizes: Vec<_> = children
@@ -559,11 +558,6 @@ fn text_canvas<A: Clone>(
         }
     }
     Ok(canvas)
-}
-
-fn split_text_lines(text: &str) -> Result<Vec<&str>, Error> {
-    validate_text(text)?;
-    Ok(text.split('\n').collect())
 }
 
 fn validate_text(text: &str) -> Result<(), Error> {
