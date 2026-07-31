@@ -565,19 +565,17 @@ fn parse_nodes<A: Clone>(input: &str, arena: &Mutex<Vec<A>>) -> Result<Vec<Node<
         } else if let Some(spec) = marker.strip_prefix("F|") {
             stack.push(ParseOpen::Flex(parse_flex_spec(spec)?, Vec::new()));
         } else if let Some(button) = marker.strip_prefix("B|") {
-            let mut fields = button.split('|');
-            let action_id = fields
-                .next()
-                .and_then(|value| value.parse::<usize>().ok())
-                .ok_or_else(|| layout_error("invalid Button action marker"))?;
-            let focused = match fields.next() {
-                Some("0") => false,
-                Some("1") => true,
+            let (action_id, focused) = button
+                .split_once('|')
+                .ok_or_else(|| layout_error("invalid Button marker"))?;
+            let action_id = action_id
+                .parse::<usize>()
+                .map_err(|_| layout_error("invalid Button action marker"))?;
+            let focused = match focused {
+                "0" => false,
+                "1" => true,
                 _ => return Err(layout_error("invalid Button focused marker")),
             };
-            if fields.next().is_some() {
-                return Err(layout_error("invalid Button marker"));
-            }
             let action = actions
                 .get(action_id)
                 .cloned()
