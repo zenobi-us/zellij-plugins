@@ -87,7 +87,7 @@ impl<A: Clone> Canvas<A> {
         let mut lines = Vec::with_capacity(self.height());
         let mut hitboxes = Vec::with_capacity(self.height());
         for row in self.cells {
-            let mut line = String::new();
+            let mut line = String::with_capacity(row.len());
             let mut actions = Vec::with_capacity(row.len());
             for cell in row {
                 if cell.text.is_empty() {
