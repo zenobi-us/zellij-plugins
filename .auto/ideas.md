@@ -1,2 +1,5 @@
 - Revisit direct leaf painting only if it can avoid per-child validation branches, for example by carrying a precomputed plain-ASCII flag on text/button nodes during parse.
 - Revisit `CellText` or another compact cell representation only as part of a broader output-path redesign; it improved median cost but regressed p95 as a standalone enum swap.
+- Investigate whether the synthetic root Flex wrapper can be skipped for a single top-level layout helper without changing layout semantics; this could remove one full layout pass, but it needs behavior tests for top-level Text, Button, and multi-root templates.
+- Improve benchmark isolation before accepting more sub-10us wins: try CPU pinning, higher iterations, or recording median of more runs in `pkgs/zellij-render-bench/scripts/measure.sh`.
+- Consider a larger output-path redesign that paints leaf text directly into a parent canvas only if ANSI validation and hitbox behavior stay exact.

@@ -28,9 +28,14 @@ impl<A> Default for Cell<A> {
 
 impl<A: Clone> Canvas<A> {
     fn new(width: usize, height: usize) -> Self {
-        Self {
-            cells: vec![vec![Cell::default(); width]; height],
-        }
+        let cells = (0..height)
+            .map(|_| {
+                let mut row = Vec::with_capacity(width);
+                row.resize_with(width, Cell::default);
+                row
+            })
+            .collect();
+        Self { cells }
     }
 
     fn width(&self) -> usize {
