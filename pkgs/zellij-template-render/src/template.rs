@@ -529,6 +529,9 @@ enum ParseOpen<A> {
 }
 
 fn parse_nodes<A: Clone>(input: &str, arena: &Mutex<Vec<A>>) -> Result<Vec<Node<A>>, Error> {
+    let actions = arena
+        .lock()
+        .map_err(|_| layout_error("action registry lock poisoned"))?;
     let mut stack = vec![ParseOpen::Root(Vec::new())];
     let mut rest = input;
     while let Some(at) = rest.find(MARKER) {
@@ -570,9 +573,7 @@ fn parse_nodes<A: Clone>(input: &str, arena: &Mutex<Vec<A>>) -> Result<Vec<Node<
             if fields.next().is_some() {
                 return Err(layout_error("invalid Button marker"));
             }
-            let action = arena
-                .lock()
-                .map_err(|_| layout_error("action registry lock poisoned"))?
+            let action = actions
                 .get(action_id)
                 .cloned()
                 .ok_or_else(|| layout_error("invalid Button action marker"))?;
