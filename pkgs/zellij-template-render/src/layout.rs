@@ -158,25 +158,35 @@ fn layout_flex<A: Clone>(
     width: usize,
     height: usize,
 ) -> Result<Canvas<A>, Error> {
-    let mut indicator = None;
-    let mut normal = Vec::with_capacity(children.len());
-    for child in children {
-        match child {
-            Node::OnOverflow { children } if indicator.is_none() => indicator = Some(children),
-            Node::OnOverflow { .. } => {
-                return Err(layout_error("Flex accepts at most one OnOverflow child"))
-            },
-            _ => normal.push(child.clone()),
-        }
-    }
-    let Some(indicator_children) = indicator else {
+    let indicator_index = children
+        .iter()
+        .position(|child| matches!(child, Node::OnOverflow { .. }));
+    let Some(indicator_index) = indicator_index else {
         return layout_flex_children(spec, children, width, height);
+    };
+    if children
+        .iter()
+        .skip(indicator_index + 1)
+        .any(|child| matches!(child, Node::OnOverflow { .. }))
+    {
+        return Err(layout_error("Flex accepts at most one OnOverflow child"));
+    }
+    let Node::OnOverflow {
+        children: indicator_children,
+    } = &children[indicator_index]
+    else {
+        unreachable!()
     };
     if spec.overflow != Overflow::Scroll {
         return Err(layout_error(
             "OnOverflow parent Flex must use overflow=\"scroll\"",
         ));
     }
+    let normal = children
+        .iter()
+        .enumerate()
+        .filter_map(|(index, child)| (index != indicator_index).then(|| child.clone()))
+        .collect::<Vec<_>>();
     let main_available = if spec.direction == Direction::Row {
         width
     } else {

@@ -1,1 +1,2 @@
 {"type":"config","name":"Optimize zellij-template-render 100-button render path","metricName":"render_p95_us","metricUnit":"µs","bestDirection":"lower"}
+{"run":1,"commit":"9f30a4b","metric":659,"metrics":{"render_p50_us":496,"render_p99_us":821,"render_max_us":888,"render_worst_us":902,"benchmark_runs":3,"benchmark_iterations":1000},"status":"keep","description":"baseline 100-button render benchmark before renderer changes","timestamp":1785491298731,"segment":0,"confidence":null,"asi":{"hypothesis":"establish baseline for 100-button MiniJinja Flex render path"}}
