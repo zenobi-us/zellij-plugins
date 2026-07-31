@@ -1,7 +1,7 @@
 //! Measures and paints layout trees into viewport-sized text and hitbox frames.
 
 use minijinja::Error;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
 use super::template::{Align, Basis, Direction, FlexSpec, Justify, Node, Overflow};
 use super::{layout_error, Frame};
@@ -567,16 +567,16 @@ fn split_text_lines(text: &str) -> Result<Vec<&str>, Error> {
 }
 
 fn visible_width(text: &str) -> usize {
-    let mut plain = String::new();
+    let mut width = 0;
     let mut chars = text.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '\u{1b}' {
             let _ = consume_ansi(&mut chars, &mut String::new());
         } else {
-            plain.push(ch);
+            width += UnicodeWidthChar::width(ch).unwrap_or(0);
         }
     }
-    UnicodeWidthStr::width(plain.as_str())
+    width
 }
 
 pub(super) fn consume_ansi(
