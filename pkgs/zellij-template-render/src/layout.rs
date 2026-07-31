@@ -500,6 +500,15 @@ fn text_canvas<A: Clone>(
     let lines = split_text_lines(text)?;
     let mut canvas = Canvas::new(width, height);
     for (y, line) in lines.iter().take(height).enumerate() {
+        if line.bytes().all(|byte| (0x20..0x7f).contains(&byte)) {
+            for (x, byte) in line.bytes().take(width).enumerate() {
+                canvas.cells[y][x] = Cell {
+                    text: char::from(byte).to_string(),
+                    action: action.clone(),
+                };
+            }
+            continue;
+        }
         let mut x = 0;
         let mut active_sgr = String::new();
         let mut pending = String::new();
