@@ -1,6 +1,6 @@
 [package]
 name = "zellij-tabbar"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Zellij tab bar plugin for Pi agent sessions"
 license = "MIT"
